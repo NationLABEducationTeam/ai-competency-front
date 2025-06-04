@@ -1,0 +1,15 @@
+{
+    "CORSRules": [
+        {
+            "AllowedHeaders": ["*"],
+            "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+            "AllowedOrigins": [
+                "http://competency-surveys-platform.s3-website.ap-northeast-2.amazonaws.com",
+                "https://competency-surveys-platform.s3-website.ap-northeast-2.amazonaws.com",
+                "http://localhost:3000",
+                "https://localhost:3000"
+            ],
+            "ExposeHeaders": ["ETag"]
+        }
+    ]
+} 
