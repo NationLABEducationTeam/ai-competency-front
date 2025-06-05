@@ -36,6 +36,16 @@ export const API_CONFIG = {
     EXCEL_TEMPLATE: '/api/v1/files/template/excel',
   },
   
+  // Lambda 서비스
+  LAMBDA: {
+    EMAIL_SERVICE: 'https://ieruo5x3ppwkcjqnehupd4oo4y0hcagx.lambda-url.ap-northeast-2.on.aws/',
+  },
+  
+  // AWS S3 설정
+  S3: {
+    BUCKET_NAME: 'competency-surveys',
+  },
+  
   // 요청 설정
   TIMEOUT: 30000,
   

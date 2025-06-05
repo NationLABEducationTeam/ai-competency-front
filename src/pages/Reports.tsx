@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import S3Service, { SurveyResponse } from '../services/s3Service';
 import { generateReportPDF, generateMultipleReportsPDF } from '../utils/pdfGenerator';
 import { AIAnalysisService } from '../services/aiAnalysisService';
+import { API_CONFIG } from '../config/api';
 import {
   Box,
   Typography,
@@ -117,6 +118,8 @@ const Reports: React.FC = () => {
   const [selectedStudentForAI, setSelectedStudentForAI] = useState<StudentResponse | null>(null);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [emailDialogInfo, setEmailDialogInfo] = useState<{ name: string; email: string; pdfPath: string } | null>(null);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSendResult, setEmailSendResult] = useState<string | null>(null);
 
   // S3에서 응답 데이터 로드
   useEffect(() => {
@@ -705,6 +708,53 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
       setError('데이터 새로고침에 실패했습니다.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendEmail = async () => {
+    if (!emailDialogInfo) return;
+    setEmailSending(true);
+    setEmailSendResult(null);
+    try {
+      // PDF 경로 생성 (.json을 .pdf로 변경)
+      const pdfPath = emailDialogInfo.pdfPath.replace('.json', '.pdf');
+      
+      const payload = {
+        bucketName: API_CONFIG.S3.BUCKET_NAME,
+        fileName: pdfPath,
+        recipients: [emailDialogInfo.email],
+        subject: 'AI 역량 진단 리포트',
+        messageTitle: 'AI 역량 진단 결과 안내',
+        messageText: `${emailDialogInfo.name}님의 AI 역량 진단 리포트를 첨부하여 보내드립니다.`,
+        senderName: "Nation's LAB",
+        additionalInfo: `${emailDialogInfo.name}님의 AI 역량 진단 결과입니다.`
+      };
+      
+      // 🔍 디버깅: 보내는 payload 확인
+      console.log('=== 이메일 송부 payload ===');
+      console.log('원본 emailDialogInfo.pdfPath:', emailDialogInfo.pdfPath);
+      console.log('변경된 pdfPath:', pdfPath);
+      console.log('API_CONFIG.S3.BUCKET_NAME:', API_CONFIG.S3.BUCKET_NAME);
+      console.log('payload:', JSON.stringify(payload, null, 2));
+      
+      const res = await fetch(API_CONFIG.LAMBDA.EMAIL_SERVICE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      console.log('Lambda 응답:', data);
+      
+      if (data.success) {
+        setEmailSendResult('이메일 전송 성공!');
+      } else {
+        setEmailSendResult('이메일 전송 실패: ' + (data.error || data.message));
+      }
+    } catch (err) {
+      console.error('이메일 전송 오류:', err);
+      setEmailSendResult('이메일 전송 중 오류 발생: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setEmailSending(false);
     }
   };
 
@@ -1473,23 +1523,34 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
       />
 
       {/* 이메일 송부 다이얼로그 */}
-      <Dialog open={emailDialogOpen} onClose={() => setEmailDialogOpen(false)}>
-        <DialogTitle>이메일로 결과 송부 (테스트용)</DialogTitle>
+      <Dialog open={emailDialogOpen} onClose={() => { setEmailDialogOpen(false); setEmailSendResult(null); }}>
+        <DialogTitle>이메일로 결과 송부</DialogTitle>
         <DialogContent>
           {emailDialogInfo && (
             <Box sx={{ minWidth: 320 }}>
               <Typography variant="body1" sx={{ mb: 1 }}><strong>이름:</strong> {emailDialogInfo.name}</Typography>
               <Typography variant="body1" sx={{ mb: 1 }}><strong>이메일:</strong> {emailDialogInfo.email}</Typography>
               <Typography variant="body1" sx={{ mb: 1 }}><strong>PDF 경로:</strong> {emailDialogInfo.pdfPath}</Typography>
+              {emailSendResult && (
+                <Alert severity={emailSendResult.includes('성공') ? 'success' : 'error'} sx={{ mt: 2 }}>{emailSendResult}</Alert>
+              )}
               <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                실제 이메일 전송 기능은 아직 구현되지 않았습니다.<br />
-                (이 정보가 람다 함수로 전달될 예정입니다)
+                실제 이메일 전송 기능이 활성화되어 있습니다.<br />
+                (이 정보가 람다 함수로 전달됩니다)
               </Typography>
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEmailDialogOpen(false)} color="primary">닫기</Button>
+          <Button onClick={() => { setEmailDialogOpen(false); setEmailSendResult(null); }} color="primary">닫기</Button>
+          <Button
+            onClick={handleSendEmail}
+            color="secondary"
+            variant="contained"
+            disabled={emailSending || !emailDialogInfo}
+          >
+            {emailSending ? '전송 중...' : '이메일 송부'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Container>
