@@ -5,22 +5,22 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // AWS 설정
 const AWS_CONFIG = {
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,  // 실제 AWS Access Key ID
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,  // 실제 AWS Secret Access Key
-  region: 'ap-northeast-2',
-  bucketName: 'competency-surveys',  // 설문 폼과 응답 저장용 버킷
+  accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY_ID,  // 실제 AWS Access Key ID
+  secretAccessKey: process.env.REACT_APP_AWS_SECRET_ACCESS_KEY,  // 실제 AWS Secret Access Key
+  region: process.env.REACT_APP_AWS_REGION,
+  bucketName: process.env.REACT_APP_S3_BUCKET_NAME,  // 설문 폼과 응답 저장용 버킷
   // 프로덕션용 Cognito 설정
   cognitoIdentityPoolId: '',
 };
 
 // 개발용 S3 클라이언트 (직접 자격 증명 사용)
-const s3Client = new S3Client([{
+const s3Client = new S3Client({
   region: AWS_CONFIG.region,
   credentials: {
     accessKeyId: AWS_CONFIG.accessKeyId || '',
     secretAccessKey: AWS_CONFIG.secretAccessKey || '',
   },
-}]);
+});
 
 /* 프로덕션용 S3 클라이언트 (Cognito 사용) 
 const s3ClientProduction = new S3Client({
@@ -915,8 +915,10 @@ class S3Service {
         if (prefix.Prefix) {
           // reports/{workspaceName}/{surveyFolderName}/ 에서 surveyFolderName만 추출
           const parts = prefix.Prefix.split('/');
-          const surveyFolderName = parts[parts.length - 2]; // 마지막 빈 문자열 제외하고 그 앞
+          let surveyFolderName = parts[parts.length - 2]; // 마지막 빈 문자열 제외하고 그 앞
           if (surveyFolderName) {
+            // 폴더명 디코딩 적용
+            surveyFolderName = decodeURIComponent(surveyFolderName);
             folderNames.push(surveyFolderName);
             console.log('✅ 발견된 설문 폴더:', surveyFolderName);
           }

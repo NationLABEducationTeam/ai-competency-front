@@ -39,6 +39,7 @@ import {
   FileDownload,
   AutoAwesome,
   Refresh,
+  Email,
 } from '@mui/icons-material';
 import AIAnalysisModal from '../components/AIAnalysisModal';
 
@@ -114,6 +115,8 @@ const Reports: React.FC = () => {
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<StudentResponse | null>(null);
   const [aiAnalysisModalOpen, setAiAnalysisModalOpen] = useState(false);
   const [selectedStudentForAI, setSelectedStudentForAI] = useState<StudentResponse | null>(null);
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailDialogInfo, setEmailDialogInfo] = useState<{ name: string; email: string; pdfPath: string } | null>(null);
 
   // S3에서 응답 데이터 로드
   useEffect(() => {
@@ -146,7 +149,12 @@ const Reports: React.FC = () => {
         });
         
         // Map을 배열로 변환
-        const uniqueResponses = Array.from(responseMap.values());
+        const uniqueResponses = Array.from(responseMap.values()).map((response) => ({
+          ...response,
+          surveyFolderName: response.surveyFolderName
+            ? decodeURIComponent(response.surveyFolderName)
+            : response.surveyFolderName,
+        }));
         console.log('📋 중복 제거 후 리포트 수:', uniqueResponses.length);
         
         // 워크스페이스별로 그룹화
@@ -585,7 +593,12 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
       });
       
       // Map을 배열로 변환
-      const uniqueResponses = Array.from(responseMap.values());
+      const uniqueResponses = Array.from(responseMap.values()).map((response) => ({
+        ...response,
+        surveyFolderName: response.surveyFolderName
+          ? decodeURIComponent(response.surveyFolderName)
+          : response.surveyFolderName,
+      }));
       console.log('📋 새로고침 - 중복 제거 후 리포트 수:', uniqueResponses.length);
       
       // 워크스페이스별로 그룹화
@@ -990,29 +1003,6 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
                           size="small"
                           startIcon={<Visibility sx={{ fontSize: 18 }} />}
                           onClick={() => handleStudentDetail(student)}
-                        sx={{ 
-                            borderColor: '#667eea',
-                          color: '#667eea',
-                            fontWeight: 600,
-                            fontSize: '0.85rem',
-                            textTransform: 'none',
-                          '&:hover': {
-                              borderColor: '#5a67d8',
-                              backgroundColor: 'rgba(102, 126, 234, 0.08)',
-                            },
-                            transition: 'all 0.2s ease',
-                            px: 2.5,
-                            py: 0.75,
-                        }}
-                      >
-                          상세보기
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          startIcon={<AutoAwesome sx={{ fontSize: 18 }} />}
-                          endIcon={<PictureAsPdf sx={{ fontSize: 16 }} />}
-                        onClick={() => handleDownloadIndividualPDF(student)}
                           sx={{ 
                             borderColor: '#667eea',
                             color: '#667eea',
@@ -1027,8 +1017,60 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
                             px: 2.5,
                             py: 0.75,
                           }}
-                      >
+                        >
+                          상세보기
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<AutoAwesome sx={{ fontSize: 18 }} />}
+                          endIcon={<PictureAsPdf sx={{ fontSize: 16 }} />}
+                          onClick={() => handleDownloadIndividualPDF(student)}
+                          sx={{ 
+                            borderColor: '#667eea',
+                            color: '#667eea',
+                            fontWeight: 600,
+                            fontSize: '0.85rem',
+                            textTransform: 'none',
+                            '&:hover': {
+                              borderColor: '#5a67d8',
+                              backgroundColor: 'rgba(102, 126, 234, 0.08)',
+                            },
+                            transition: 'all 0.2s ease',
+                            px: 2.5,
+                            py: 0.75,
+                          }}
+                        >
                           AI 리포트
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<Email sx={{ fontSize: 16 }} />}
+                          onClick={() => {
+                            setEmailDialogInfo({
+                              name: student.studentName,
+                              email: student.studentInfo.email,
+                              pdfPath: student.s3Key || '',
+                            });
+                            setEmailDialogOpen(true);
+                          }}
+                          sx={{
+                            borderColor: '#667eea',
+                            color: '#667eea',
+                            fontWeight: 600,
+                            fontSize: '0.85rem',
+                            textTransform: 'none',
+                            '&:hover': {
+                              borderColor: '#5a67d8',
+                              backgroundColor: 'rgba(102, 126, 234, 0.08)',
+                            },
+                            transition: 'all 0.2s ease',
+                            px: 2.5,
+                            py: 0.75,
+                          }}
+                        >
+                          이메일 송부
                         </Button>
                       </>
                     ) : (
@@ -1429,6 +1471,27 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
         }}
         studentData={selectedStudentForAI}
       />
+
+      {/* 이메일 송부 다이얼로그 */}
+      <Dialog open={emailDialogOpen} onClose={() => setEmailDialogOpen(false)}>
+        <DialogTitle>이메일로 결과 송부 (테스트용)</DialogTitle>
+        <DialogContent>
+          {emailDialogInfo && (
+            <Box sx={{ minWidth: 320 }}>
+              <Typography variant="body1" sx={{ mb: 1 }}><strong>이름:</strong> {emailDialogInfo.name}</Typography>
+              <Typography variant="body1" sx={{ mb: 1 }}><strong>이메일:</strong> {emailDialogInfo.email}</Typography>
+              <Typography variant="body1" sx={{ mb: 1 }}><strong>PDF 경로:</strong> {emailDialogInfo.pdfPath}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                실제 이메일 전송 기능은 아직 구현되지 않았습니다.<br />
+                (이 정보가 람다 함수로 전달될 예정입니다)
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEmailDialogOpen(false)} color="primary">닫기</Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
