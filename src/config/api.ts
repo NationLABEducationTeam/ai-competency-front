@@ -1,9 +1,29 @@
+// 환경별 API BASE URL 설정
+const getBaseUrl = () => {
+  const hostname = window.location.hostname;
+  let baseUrl = '';
+  
+  // localhost에서 개발할 때
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    baseUrl = 'http://3.35.230.242:8081';
+    console.log('🔧 [API CONFIG] 개발 환경 감지 - 3.35.230.242:8081로 API 요청');
+  } else {
+    // S3 배포 환경일 때
+    baseUrl = 'http://3.35.230.242:8080';
+    console.log('🚀 [API CONFIG] 배포 환경 감지 - 3.35.230.242:8080으로 API 요청');
+  }
+  
+  console.log(`📡 [API CONFIG] BASE_URL 설정: ${baseUrl}`);
+  console.log(`🌐 [API CONFIG] 현재 hostname: ${hostname}`);
+  
+  return baseUrl;
+};
+
 export const API_CONFIG = {
-  BASE_URL: 'http://3.35.230.242:8080',
+  BASE_URL: getBaseUrl(),
   API_PREFIX: '/api/v1',
   ENDPOINTS: {
     // 인증
-    LOGIN: '/api/v1/auth/login',
     LOGOUT: '/api/v1/auth/logout',
     REGISTER: '/api/v1/auth/register',
     ME: '/api/v1/auth/me',

@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { useAuthStore } from './store/authStore';
+import { testConnection } from './services/apiService';
 
 // Pages
 import Login from './pages/Login';
@@ -156,17 +157,36 @@ function App() {
   const { isAuthenticated, checkAuth } = useAuthStore();
   const [isInitializing, setIsInitializing] = React.useState(true);
 
-  // 앱 시작 시 인증 상태 확인
+  // 앱 시작 시 API 연결 상태 및 인증 상태 확인
   useEffect(() => {
-    const initAuth = async () => {
+    const initApp = async () => {
       try {
+        // API 연결 상태 확인
+        console.log('🚀 [APP] 애플리케이션 초기화 시작');
+        console.log('🔗 [APP] API 연결 상태 확인 중...');
+        
+        try {
+          const connectionResult = await testConnection();
+          console.log('✅ [APP] API 연결 성공:', connectionResult);
+        } catch (error) {
+          console.error('❌ [APP] API 연결 실패:', error);
+          console.warn('⚠️ [APP] 백엔드 서버가 실행 중인지 확인하세요');
+        }
+        
+        // 인증 상태 확인
+        console.log('🔐 [APP] 인증 상태 확인 중...');
         checkAuth();
+        console.log('✅ [APP] 인증 상태 확인 완료');
+        
+      } catch (error) {
+        console.error('❌ [APP] 초기화 중 오류 발생:', error);
       } finally {
         setIsInitializing(false);
+        console.log('🎉 [APP] 애플리케이션 초기화 완료');
       }
     };
     
-    initAuth();
+    initApp();
   }, [checkAuth]);
 
   // 초기화 중일 때는 로딩 화면 표시
@@ -218,11 +238,11 @@ function App() {
             <Route path="workspaces" element={<Workspaces />} />
             <Route path="workspaces/:workspaceId" element={<WorkspaceDetail />} />
             <Route path="reports" element={<Reports />} />
-            <Route path="reports/:workspaceId" element={<Reports />} />
+            <Route path="reports/workspace/:workspaceId" element={<Reports />} />
+            <Route path="reports/workspace/:workspaceId/survey/:surveyId" element={<Reports />} />
             <Route path="reports/detail/:reportId" element={<ReportDetail />} />
             <Route path="trash" element={<Trash />} />
             <Route path="settings" element={<Settings />} />
-            <Route path="reports/:surveyId" element={<Reports />} />
           </Route>
         </Routes>
       </Router>

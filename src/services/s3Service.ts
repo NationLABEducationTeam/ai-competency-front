@@ -600,9 +600,11 @@ class S3Service {
   /**
    * S3에서 모든 리포트 파일을 조회합니다 (reports 폴더)
    */
-  static async listAllReports(): Promise<SurveyResponse[]> {
+  static async listAllReports(forceRefresh: boolean = false): Promise<SurveyResponse[]> {
     try {
-      console.log('📋 S3에서 모든 리포트 파일 조회 시작');
+      const timestamp = new Date().toISOString();
+      console.log(`📋 S3에서 모든 리포트 파일 조회 시작 [${timestamp}]`);
+      console.log(`🔄 강제 새로고침: ${forceRefresh ? '✅' : '❌'}`);
       
       const command = new ListObjectsV2Command({
         Bucket: AWS_CONFIG.bucketName,
@@ -612,6 +614,33 @@ class S3Service {
 
       const response = await s3Client.send(command);
       console.log('📋 S3 리포트 파일 목록:', response.Contents?.length || 0, '개');
+      
+      // 상세한 파일 목록 출력 (디버깅용)
+      if (response.Contents) {
+        console.log('📄 발견된 S3 파일들:');
+        const filesByWorkspace: { [key: string]: string[] } = {};
+        
+        response.Contents.forEach(obj => {
+          if (obj.Key && obj.Key.endsWith('.json')) {
+            const pathParts = obj.Key.split('/');
+            if (pathParts.length >= 3) {
+              const workspaceName = pathParts[1];
+              const surveyFolder = pathParts[2];
+              const fileName = pathParts[pathParts.length - 1];
+              
+              if (!filesByWorkspace[workspaceName]) {
+                filesByWorkspace[workspaceName] = [];
+              }
+              filesByWorkspace[workspaceName].push(`${surveyFolder}/${fileName}`);
+            }
+          }
+        });
+        
+        Object.entries(filesByWorkspace).forEach(([workspace, files]) => {
+          console.log(`  📁 ${workspace}:`);
+          files.forEach(file => console.log(`    📄 ${file}`));
+        });
+      }
 
       if (!response.Contents) {
         return [];
@@ -623,8 +652,18 @@ class S3Service {
       for (const object of response.Contents) {
         if (object.Key && object.Key.endsWith('.json')) {
           try {
-            const fileUrl = `https://${AWS_CONFIG.bucketName}.s3.${AWS_CONFIG.region}.amazonaws.com/${object.Key}`;
-            const fileResponse = await fetch(fileUrl);
+            // 캐시 방지를 위한 타임스탬프 추가
+            const cacheBuster = forceRefresh ? `?_t=${Date.now()}` : '';
+            const fileUrl = `https://${AWS_CONFIG.bucketName}.s3.${AWS_CONFIG.region}.amazonaws.com/${object.Key}${cacheBuster}`;
+            
+            const fileResponse = await fetch(fileUrl, {
+              method: 'GET',
+              headers: {
+                'Cache-Control': forceRefresh ? 'no-cache, no-store, must-revalidate' : 'default',
+                'Pragma': forceRefresh ? 'no-cache' : 'default',
+                'Expires': forceRefresh ? '0' : 'default'
+              }
+            });
             
             if (fileResponse.ok) {
               const reportData = await fileResponse.json();
@@ -642,6 +681,19 @@ class S3Service {
       }
 
       console.log('📋 총 로드된 리포트:', reports.length, '개');
+      
+      // 워크스페이스별 통계 출력
+      const workspaceStats: { [key: string]: number } = {};
+      reports.forEach(report => {
+        const workspace = report.workspaceName;
+        workspaceStats[workspace] = (workspaceStats[workspace] || 0) + 1;
+      });
+      
+      console.log('📊 워크스페이스별 리포트 수:');
+      Object.entries(workspaceStats).forEach(([workspace, count]) => {
+        console.log(`  📁 ${workspace}: ${count}개`);
+      });
+      
       return reports;
       
     } catch (error) {

@@ -566,6 +566,83 @@ export const reportAPI = {
     const result = await apiRequest<WorkspaceReport>(`/api/v1/reports/${workspaceId}`);
     console.log('📥 워크스페이스 리포트 조회 결과:', result);
     return result;
+  },
+
+  // 새로운 Reports API들
+  getWorkspaces: async (): Promise<{ workspaces: string[]; total_count: number }> => {
+    console.log('📡 리포트 워크스페이스 목록 조회 요청');
+    const result = await apiRequest<{ workspaces: string[]; total_count: number }>('/api/v1/reports/workspaces');
+    console.log('📥 리포트 워크스페이스 목록 조회 결과:', result);
+    return result;
+  },
+
+  getSurveysByWorkspace: async (workspaceName: string): Promise<{
+    workspace_name: string;
+    surveys: Array<{
+      survey_name: string;
+      original_results_count: number;
+      ai_results_count: number;
+      total_students: number;
+    }>;
+    total_surveys: number;
+  }> => {
+    console.log('📡 워크스페이스별 설문 목록 조회 요청:', workspaceName);
+    const encodedName = encodeURIComponent(workspaceName);
+    const result = await apiRequest<{
+      workspace_name: string;
+      surveys: Array<{
+        survey_name: string;
+        original_results_count: number;
+        ai_results_count: number;
+        total_students: number;
+      }>;
+      total_surveys: number;
+    }>(`/api/v1/reports/workspaces/${encodedName}/surveys`);
+    console.log('📥 워크스페이스별 설문 목록 조회 결과:', result);
+    return result;
+  },
+
+  getAIResults: async (workspaceName: string, surveyName: string): Promise<{
+    workspace_name: string;
+    survey_name: string;
+    ai_results: Array<{
+      student_name: string;
+      file_key: string;
+      size: number;
+      last_modified: string;
+      download_url: string;
+    }>;
+    total_count: number;
+  }> => {
+    console.log('📡 AI 분석 결과 조회 요청:', { workspaceName, surveyName });
+    const encodedWorkspace = encodeURIComponent(workspaceName);
+    const encodedSurvey = encodeURIComponent(surveyName);
+    const result = await apiRequest<{
+      workspace_name: string;
+      survey_name: string;
+      ai_results: Array<{
+        student_name: string;
+        file_key: string;
+        size: number;
+        last_modified: string;
+        download_url: string;
+      }>;
+      total_count: number;
+    }>(`/api/v1/reports/workspaces/${encodedWorkspace}/surveys/${encodedSurvey}/ai`);
+    console.log('📥 AI 분석 결과 조회 결과:', result);
+    return result;
+  },
+
+  // AI 결과 파일 내용 다운로드 (JSON 파싱)
+  downloadAIResult: async (downloadUrl: string): Promise<any> => {
+    console.log('📡 AI 결과 파일 다운로드 요청:', downloadUrl);
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+      throw new Error(`AI 결과 다운로드 실패: ${response.status}`);
+    }
+    const result = await response.json();
+    console.log('📥 AI 결과 파일 다운로드 완료');
+    return result;
   }
 };
 

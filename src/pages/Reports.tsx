@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import S3Service, { SurveyResponse } from '../services/s3Service';
+import { reportAPI } from '../services/apiService';
 import { generateReportPDF, generateMultipleReportsPDF } from '../utils/pdfGenerator';
 import { AIAnalysisService } from '../services/aiAnalysisService';
 import { API_CONFIG } from '../config/api';
@@ -103,15 +103,54 @@ interface WorkspaceStudents {
   [workspaceName: string]: StudentResponse[];
 }
 
+// 새로운 백엔드 API를 사용한 데이터 타입 정의
+interface WorkspaceInfo {
+  name: string;
+  surveys: SurveyInfo[];
+}
+
+interface SurveyInfo {
+  survey_name: string;
+  original_results_count: number;
+  ai_results_count: number;
+  total_students: number;
+}
+
+interface AIResult {
+  student_name: string;
+  file_key: string;
+  size: number;
+  last_modified: string;
+  download_url: string;
+  data?: any; // 다운로드한 실제 데이터
+}
+
 const Reports: React.FC = () => {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
+  const { workspaceId, surveyId } = useParams<{ workspaceId: string; surveyId: string }>();
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [workspaceStudents, setWorkspaceStudents] = useState<WorkspaceStudents>({});
+  
+  // URL 파라미터 기반 현재 단계 결정
+  const getCurrentStep = () => {
+    if (!workspaceId) return 'workspace-selection';
+    if (!surveyId) return 'survey-selection';
+    return 'student-results';
+  };
+  
+  const currentStep = getCurrentStep();
+  
+  // 새로운 백엔드 API 데이터 구조
+  const [workspaces, setWorkspaces] = useState<string[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string>(workspaceId || '');
+  const [workspaceSurveys, setWorkspaceSurveys] = useState<SurveyInfo[]>([]);
+  const [selectedSurvey, setSelectedSurvey] = useState<string>(surveyId || '');
+  const [aiResults, setAiResults] = useState<AIResult[]>([]);
+  const [studentData, setStudentData] = useState<StudentResponse[]>([]);
+  
+  // 기존 UI 상태
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string>('');
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<StudentResponse | null>(null);
   const [aiAnalysisModalOpen, setAiAnalysisModalOpen] = useState(false);
@@ -121,174 +160,84 @@ const Reports: React.FC = () => {
   const [emailSending, setEmailSending] = useState(false);
   const [emailSendResult, setEmailSendResult] = useState<string | null>(null);
 
-  // S3에서 응답 데이터 로드
+  // URL 파라미터에 따른 데이터 로드
   useEffect(() => {
-    const loadResponses = async () => {
+    const loadDataBasedOnURL = async () => {
       try {
         setLoading(true);
-        console.log('📋 S3에서 응답 데이터 로드 시작');
+        setError(null);
         
-        // S3에서 모든 리포트 파일 조회 (AI 분석 여부 상관없이)
-        const allResponses = await S3Service.listAllReports();
-        console.log('📋 로드된 전체 리포트 수:', allResponses.length);
+        // 1단계: 워크스페이스 목록 항상 로드
+        console.log('📋 1단계: 워크스페이스 목록 로드 시작');
+        const workspaceResult = await reportAPI.getWorkspaces();
+        setWorkspaces(workspaceResult.workspaces);
+        console.log('✅ 워크스페이스 목록 로드 완료:', workspaceResult.workspaces);
         
-        // 중복 제거 - 학생 이름 기준으로 AI 분석 완료된 것을 우선
-        const responseMap = new Map<string, SurveyResponse>();
-        
-        // 먼저 AI 폴더가 아닌 일반 응답들을 추가
-        allResponses.forEach((response) => {
-          if (!response.s3Key?.includes('/AI/')) {
-            const key = `${response.workspaceName}-${response.studentInfo.name}`;
-            responseMap.set(key, response);
-          }
-        });
-        
-        // 그 다음 AI 폴더의 응답들로 덮어쓰기 (AI 분석 완료된 것 우선)
-        allResponses.forEach((response) => {
-          if (response.s3Key?.includes('/AI/')) {
-            const key = `${response.workspaceName}-${response.studentInfo.name}`;
-            responseMap.set(key, response);
-          }
-        });
-        
-        // Map을 배열로 변환
-        const uniqueResponses = Array.from(responseMap.values()).map((response) => ({
-          ...response,
-          surveyFolderName: response.surveyFolderName
-            ? decodeURIComponent(response.surveyFolderName)
-            : response.surveyFolderName,
-        }));
-        console.log('📋 중복 제거 후 리포트 수:', uniqueResponses.length);
-        
-        // 워크스페이스별로 그룹화
-        const grouped: WorkspaceStudents = {};
-        
-        uniqueResponses.forEach((response: SurveyResponse) => {
-          const workspaceName = response.workspaceName;
-          if (!grouped[workspaceName]) {
-            grouped[workspaceName] = [];
-          }
-          
-          // AI 분석 결과가 있으면 사용, 없으면 계산
-          let overallScore: number;
-          let categoryScores: Array<{category: string; score: number; maxScore: number; percentage: number}>;
-          let aiAnalysis: any = undefined;
-          
-          // 새로운 AI 분석 구조 확인 (analysis 필드)
-          if (response.analysis) {
-            // 새로운 Lambda AI 분석 결과 사용
-            console.log('✅ 새로운 Lambda AI 분석 결과 발견:', response.studentInfo.name);
-            overallScore = response.analysis.overall_score || 0;
-            
-            // 카테고리 점수 변환
-            categoryScores = [];
-            const categoryMap: { [key: string]: string } = {
-              'ai_fundamentals': 'AI/데이터 기본 이해',
-              'technical_application': '문제 해결/적용 역량',
-              'data_interpretation': '데이터 이해 및 해석 능력',
-              'business_application': 'AI 관련 협업/소통 능력',
-              'future_readiness': 'AI/기술 트렌드 민감도',
-              'ethics_and_society': 'AI 윤리 및 사회적 영향'
-            };
-            
-            for (const [key, value] of Object.entries(response.analysis.category_scores)) {
-              categoryScores.push({
-                category: categoryMap[key] || key,
-                score: Math.round(value.score * 6), // 5점 만점을 30점 만점으로 환산
-                maxScore: 30,
-                percentage: Math.round((value.score / 5) * 100)
-              });
-            }
-            
-            // 기존 형식으로 변환
-            aiAnalysis = {
-              strengths: response.analysis.strengths,
-              weaknesses: response.analysis.improvement_areas,
-              recommendations: [
-                ...response.analysis.recommendations.immediate_actions,
-                ...response.analysis.recommendations.learning_resources
-              ],
-              summary: response.analysis.comprehensive_summary
-            };
-          } else if (response.aiAnalysis) {
-            // AI 분석 결과가 있으면 사용, 없으면 계산
-            console.log('✅ S3에서 Lambda 생성 AI 분석 결과 발견:', response.studentInfo.name);
-            overallScore = response.aiAnalysis.overallScore || 0;
-            categoryScores = response.aiAnalysis.categoryScores || [];
-            
-            // AI 분석 결과 검증 및 보완
-            const validatedAIAnalysis = {
-              strengths: response.aiAnalysis.strengths && response.aiAnalysis.strengths.length > 0 
-                ? response.aiAnalysis.strengths 
-                : ['AI 기술에 대한 기본적인 이해를 갖추고 있습니다.'],
-              weaknesses: response.aiAnalysis.weaknesses && response.aiAnalysis.weaknesses.length > 0 
-                ? response.aiAnalysis.weaknesses 
-                : ['지속적인 학습과 발전이 필요합니다.'],
-              recommendations: response.aiAnalysis.recommendations && response.aiAnalysis.recommendations.length > 0 
-                ? response.aiAnalysis.recommendations 
-                : ['체계적인 AI 학습 계획을 수립하시기 바랍니다.'],
-              summary: response.aiAnalysis.summary && response.aiAnalysis.summary.length > 50 
-                ? response.aiAnalysis.summary 
-                : `${response.studentInfo.name}님의 AI 역량 진단 결과, 전반적으로 ${overallScore >= 4.0 ? '우수한' : overallScore >= 3.0 ? '양호한' : '기초적인'} 수준의 AI 역량을 보유하고 계십니다. 지속적인 학습과 실무 경험을 통해 더욱 발전시켜 나가시기 바랍니다.`
-            };
-            
-            aiAnalysis = validatedAIAnalysis;
-            console.log('🔍 Lambda 생성 AI 분석 결과 검증 완료:', {
-              summaryLength: validatedAIAnalysis.summary.length,
-              strengthsCount: validatedAIAnalysis.strengths.length,
-              weaknessesCount: validatedAIAnalysis.weaknesses.length,
-              recommendationsCount: validatedAIAnalysis.recommendations.length,
-              overallScore,
-              categoryScoresCount: categoryScores.length
-            });
-          } else {
-            // AI 분석 결과가 없으면 기본 계산
-            console.log('⚠️ AI 분석 결과 없음, 기본 계산 사용:', response.studentInfo.name);
-            const scores = Object.values(response.answers) as number[];
-            overallScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-            
-            categoryScores = [
-              { category: 'AI/데이터 기본 이해', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
-              { category: '문제 해결/적용 역량', score: Math.round(overallScore * 7), maxScore: 35, percentage: Math.round((overallScore * 7 / 35) * 100) },
-              { category: '데이터 이해 및 해석 능력', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
-              { category: 'AI 관련 협업/소통 능력', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
-              { category: 'AI/기술 트렌드 민감도', score: Math.round(overallScore * 8), maxScore: 40, percentage: Math.round((overallScore * 8 / 40) * 100) },
-            ];
-          }
-          
-          grouped[workspaceName].push({
-            ...response,
-            studentName: response.studentInfo.name,
-            s3Key: response.s3Key,  // S3 키 정보 추가
-            overallScore,
-            categoryScores,
-            aiAnalysis,  // Lambda에서 생성된 AI 분석 결과 또는 기본 분석
-          });
-        });
-        
-        setWorkspaceStudents(grouped);
-        
-        // URL에 워크스페이스 ID가 있으면 해당 워크스페이스 선택
+        // 2단계: 워크스페이스가 선택된 경우 설문 목록 로드
         if (workspaceId) {
-          const workspaceName = Object.keys(grouped).find(name => 
-            name.toLowerCase().replace(/\s+/g, '-') === workspaceId
-          );
-          if (workspaceName) {
-            setSelectedWorkspace(workspaceName);
-          }
+          console.log('📋 2단계: 워크스페이스 설문 목록 로드 시작:', workspaceId);
+          const surveyResult = await reportAPI.getSurveysByWorkspace(workspaceId);
+          setWorkspaceSurveys(surveyResult.surveys);
+          console.log('✅ 워크스페이스 설문 목록 로드 완료:', surveyResult.surveys);
         }
         
-        setError(null);
+        // 3단계: 설문이 선택된 경우 AI 결과 로드
+        if (workspaceId && surveyId) {
+          console.log('📋 3단계: AI 결과 로드 시작:', { workspaceId, surveyId });
+          const aiResult = await reportAPI.getAIResults(workspaceId, surveyId);
+          setAiResults(aiResult.ai_results);
+          
+          // 각 AI 결과 파일의 실제 데이터를 다운로드하고 StudentResponse 형태로 변환
+          const studentResponses: StudentResponse[] = [];
+          
+          for (const result of aiResult.ai_results) {
+            try {
+              console.log('📥 AI 결과 파일 다운로드:', result.student_name);
+              const data = await reportAPI.downloadAIResult(result.download_url);
+              
+              // 다운로드한 데이터를 StudentResponse 형태로 변환
+              const studentResponse: StudentResponse = {
+                studentName: result.student_name,
+                workspaceName: workspaceId,
+                surveyFolderName: surveyId,
+                s3Key: result.file_key,
+                studentInfo: data.studentInfo || {
+                  name: result.student_name,
+                  organization: data.studentInfo?.organization || '',
+                  age: data.studentInfo?.age || 0,
+                  email: data.studentInfo?.email || '',
+                  education: data.studentInfo?.education || '',
+                  major: data.studentInfo?.major || '',
+                },
+                answers: data.answers || {},
+                submittedAt: data.submittedAt || result.last_modified,
+                overallScore: data.analysis?.overall_score || data.aiAnalysis?.overallScore || 0,
+                categoryScores: convertCategoryScores(data),
+                analysis: data.analysis,
+                aiAnalysis: data.aiAnalysis
+              };
+              
+              studentResponses.push(studentResponse);
+              console.log('✅ 학생 데이터 변환 완료:', result.student_name);
+            } catch (err) {
+              console.error('❌ AI 결과 파일 처리 실패:', result.student_name, err);
+            }
+          }
+          
+          setStudentData(studentResponses);
+          console.log('✅ AI 결과 로드 완료:', studentResponses.length, '명');
+        }
+        
       } catch (err) {
-        console.error('응답 데이터 로드 실패:', err);
-        setError('응답 데이터를 불러오는데 실패했습니다.');
+        console.error('❌ 데이터 로드 실패:', err);
+        setError('데이터를 불러오는데 실패했습니다.');
       } finally {
         setLoading(false);
       }
     };
 
-    loadResponses();
-  }, [workspaceId]);
+    loadDataBasedOnURL();
+  }, [workspaceId, surveyId]);
 
   const handleStudentSelect = (studentKey: string) => {
     const newSelected = new Set(selectedStudents);
@@ -301,7 +250,7 @@ const Reports: React.FC = () => {
   };
 
   const handleSelectAll = (workspaceName: string) => {
-    const students = workspaceStudents[workspaceName] || [];
+    const students = studentData.filter(s => s.workspaceName === workspaceName);
     const studentKeys = students.map(s => `${workspaceName}-${s.studentName}`);
     
     const allSelected = studentKeys.every(key => selectedStudents.has(key));
@@ -525,7 +474,7 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
       
       selectedStudents.forEach(studentKey => {
         const [workspaceName, studentName] = studentKey.split('-');
-        const student = workspaceStudents[workspaceName]?.find(s => s.studentName === studentName);
+        const student = studentData.find(s => s.studentName === studentName && s.workspaceName === workspaceName);
         if (student) {
           selectedStudentData.push(student);
         }
@@ -566,149 +515,60 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
     return '개선필요';
   };
 
-  // 데이터 새로고침 함수
-  const handleRefresh = async () => {
-    setLoading(true);
-    try {
-      console.log('🔄 데이터 새로고침 시작');
+  // 이제 사용하지 않는 개별 로딩 함수들 (useEffect에서 URL 기반으로 통합 처리)
+
+  // 카테고리 점수 변환 헬퍼 함수
+  const convertCategoryScores = (data: any) => {
+    if (data.analysis?.category_scores) {
+      // 새로운 Lambda AI 분석 구조
+      const categoryMap: { [key: string]: string } = {
+        'ai_fundamentals': 'AI/데이터 기본 이해',
+        'technical_application': '문제 해결/적용 역량',
+        'data_interpretation': '데이터 이해 및 해석 능력',
+        'business_application': 'AI 관련 협업/소통 능력',
+        'future_readiness': 'AI/기술 트렌드 민감도',
+        'ethics_and_society': 'AI 윤리 및 사회적 영향'
+      };
       
-      // S3에서 모든 리포트 파일 조회 (AI 분석 여부 상관없이)
-      const allResponses = await S3Service.listAllReports();
-      console.log('📋 새로고침 - 로드된 전체 리포트 수:', allResponses.length);
-      
-      // 중복 제거 - 학생 이름 기준으로 AI 분석 완료된 것을 우선
-      const responseMap = new Map<string, SurveyResponse>();
-      
-      // 먼저 AI 폴더가 아닌 일반 응답들을 추가
-      allResponses.forEach((response) => {
-        if (!response.s3Key?.includes('/AI/')) {
-          const key = `${response.workspaceName}-${response.studentInfo.name}`;
-          responseMap.set(key, response);
-        }
-      });
-      
-      // 그 다음 AI 폴더의 응답들로 덮어쓰기 (AI 분석 완료된 것 우선)
-      allResponses.forEach((response) => {
-        if (response.s3Key?.includes('/AI/')) {
-          const key = `${response.workspaceName}-${response.studentInfo.name}`;
-          responseMap.set(key, response);
-        }
-      });
-      
-      // Map을 배열로 변환
-      const uniqueResponses = Array.from(responseMap.values()).map((response) => ({
-        ...response,
-        surveyFolderName: response.surveyFolderName
-          ? decodeURIComponent(response.surveyFolderName)
-          : response.surveyFolderName,
+      return Object.entries(data.analysis.category_scores).map(([key, value]: [string, any]) => ({
+        category: categoryMap[key] || key,
+        score: Math.round(value.score * 6),
+        maxScore: 30,
+        percentage: Math.round((value.score / 5) * 100)
       }));
-      console.log('📋 새로고침 - 중복 제거 후 리포트 수:', uniqueResponses.length);
-      
-      // 워크스페이스별로 그룹화
-      const grouped: WorkspaceStudents = {};
-      
-      uniqueResponses.forEach((response: SurveyResponse) => {
-        const workspaceName = response.workspaceName;
-        if (!grouped[workspaceName]) {
-          grouped[workspaceName] = [];
-        }
-        
-        // AI 분석 결과가 있으면 사용, 없으면 계산
-        let overallScore: number;
-        let categoryScores: Array<{category: string; score: number; maxScore: number; percentage: number}>;
-        let aiAnalysis: any = undefined;
-        
-        // 새로운 AI 분석 구조 확인 (analysis 필드)
-        if (response.analysis) {
-          // 새로운 Lambda AI 분석 결과 사용
-          console.log('✅ 새로운 Lambda AI 분석 결과 발견:', response.studentInfo.name);
-          overallScore = response.analysis.overall_score || 0;
-          
-          // 카테고리 점수 변환
-          categoryScores = [];
-          const categoryMap: { [key: string]: string } = {
-            'ai_fundamentals': 'AI/데이터 기본 이해',
-            'technical_application': '문제 해결/적용 역량',
-            'data_interpretation': '데이터 이해 및 해석 능력',
-            'business_application': 'AI 관련 협업/소통 능력',
-            'future_readiness': 'AI/기술 트렌드 민감도',
-            'ethics_and_society': 'AI 윤리 및 사회적 영향'
-          };
-          
-          for (const [key, value] of Object.entries(response.analysis.category_scores)) {
-            categoryScores.push({
-              category: categoryMap[key] || key,
-              score: Math.round(value.score * 6), // 5점 만점을 30점 만점으로 환산
-              maxScore: 30,
-              percentage: Math.round((value.score / 5) * 100)
-            });
-          }
-          
-          // 기존 형식으로 변환
-          aiAnalysis = {
-            strengths: response.analysis.strengths,
-            weaknesses: response.analysis.improvement_areas,
-            recommendations: [
-              ...response.analysis.recommendations.immediate_actions,
-              ...response.analysis.recommendations.learning_resources
-            ],
-            summary: response.analysis.comprehensive_summary
-          };
-        } else if (response.aiAnalysis) {
-          // AI 분석 결과가 있으면 사용, 없으면 계산
-          console.log('✅ S3에서 Lambda 생성 AI 분석 결과 발견:', response.studentInfo.name);
-          overallScore = response.aiAnalysis.overallScore || 0;
-          categoryScores = response.aiAnalysis.categoryScores || [];
-          
-          // AI 분석 결과 검증 및 보완
-          const validatedAIAnalysis = {
-            strengths: response.aiAnalysis.strengths && response.aiAnalysis.strengths.length > 0 
-              ? response.aiAnalysis.strengths 
-              : ['AI 기술에 대한 기본적인 이해를 갖추고 있습니다.'],
-            weaknesses: response.aiAnalysis.weaknesses && response.aiAnalysis.weaknesses.length > 0 
-              ? response.aiAnalysis.weaknesses 
-              : ['지속적인 학습과 발전이 필요합니다.'],
-            recommendations: response.aiAnalysis.recommendations && response.aiAnalysis.recommendations.length > 0 
-              ? response.aiAnalysis.recommendations 
-              : ['체계적인 AI 학습 계획을 수립하시기 바랍니다.'],
-            summary: response.aiAnalysis.summary && response.aiAnalysis.summary.length > 50 
-              ? response.aiAnalysis.summary 
-              : `${response.studentInfo.name}님의 AI 역량 진단 결과, 전반적으로 ${overallScore >= 4.0 ? '우수한' : overallScore >= 3.0 ? '양호한' : '기초적인'} 수준의 AI 역량을 보유하고 계십니다. 지속적인 학습과 실무 경험을 통해 더욱 발전시켜 나가시기 바랍니다.`
-          };
-          
-          aiAnalysis = validatedAIAnalysis;
-        } else {
-          // AI 분석 결과가 없으면 기본 계산
-          const scores = Object.values(response.answers) as number[];
-          overallScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-          
-          categoryScores = [
-            { category: 'AI/데이터 기본 이해', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
-            { category: '문제 해결/적용 역량', score: Math.round(overallScore * 7), maxScore: 35, percentage: Math.round((overallScore * 7 / 35) * 100) },
-            { category: '데이터 이해 및 해석 능력', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
-            { category: 'AI 관련 협업/소통 능력', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
-            { category: 'AI/기술 트렌드 민감도', score: Math.round(overallScore * 8), maxScore: 40, percentage: Math.round((overallScore * 8 / 40) * 100) },
-          ];
-        }
-        
-        grouped[workspaceName].push({
-          ...response,
-          studentName: response.studentInfo.name,
-          s3Key: response.s3Key,  // S3 키 정보 추가
-          overallScore,
-          categoryScores,
-          aiAnalysis,
-        });
-      });
-      
-      setWorkspaceStudents(grouped);
-      console.log('✅ 데이터 새로고침 완료');
-    } catch (err) {
-      console.error('❌ 데이터 새로고침 실패:', err);
-      setError('데이터 새로고침에 실패했습니다.');
-    } finally {
-      setLoading(false);
+    } else if (data.aiAnalysis?.categoryScores) {
+      // 기존 AI 분석 구조
+      return data.aiAnalysis.categoryScores;
+    } else {
+      // 기본값
+      const overallScore = data.analysis?.overall_score || data.aiAnalysis?.overallScore || 0;
+      return [
+        { category: 'AI/데이터 기본 이해', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
+        { category: '문제 해결/적용 역량', score: Math.round(overallScore * 7), maxScore: 35, percentage: Math.round((overallScore * 7 / 35) * 100) },
+        { category: '데이터 이해 및 해석 능력', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
+        { category: 'AI 관련 협업/소통 능력', score: Math.round(overallScore * 6), maxScore: 30, percentage: Math.round((overallScore * 6 / 30) * 100) },
+        { category: 'AI/기술 트렌드 민감도', score: Math.round(overallScore * 8), maxScore: 40, percentage: Math.round((overallScore * 8 / 40) * 100) },
+      ];
     }
+  };
+
+  // 워크스페이스 선택 핸들러
+  const handleWorkspaceSelect = async (workspaceName: string) => {
+    console.log('🏢 워크스페이스 선택:', workspaceName);
+    navigate(`/reports/workspace/${encodeURIComponent(workspaceName)}`);
+  };
+
+  // 설문 선택 핸들러
+  const handleSurveySelect = async (surveyName: string) => {
+    console.log('📋 설문 선택:', surveyName);
+    navigate(`/reports/workspace/${encodeURIComponent(workspaceId!)}/survey/${encodeURIComponent(surveyName)}`);
+  };
+
+  // 데이터 새로고침 함수 (URL 기반으로 전체 데이터 재로드)
+  const handleRefresh = async () => {
+    console.log('🔄 데이터 새로고침 시작 - 현재 URL 기반으로 재로드');
+    // useEffect를 다시 트리거하여 URL 기반으로 데이터 로드
+    window.location.reload();
   };
 
   const handleSendEmail = async () => {
@@ -775,10 +635,8 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
     );
   }
 
-  const workspaceNames = Object.keys(workspaceStudents);
-
   // 워크스페이스 선택 화면
-  if (!selectedWorkspace) {
+  if (currentStep === 'workspace-selection') {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Paper sx={{ p: 3, mb: 4, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
@@ -786,108 +644,139 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
             📊 AI 역량 진단 리포트
           </Typography>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="subtitle1" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-            워크스페이스를 선택하여 학생들의 진단 결과를 확인하세요
-          </Typography>
-            <Button
-              variant="outlined"
-              startIcon={<Refresh />}
-              onClick={handleRefresh}
-              disabled={loading}
-              sx={{
-                color: 'white',
-                borderColor: 'rgba(255, 255, 255, 0.5)',
-                '&:hover': {
-                  borderColor: 'white',
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)'
-                }
-              }}
-            >
-              새로고침
-            </Button>
+            <Typography variant="subtitle1" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
+              워크스페이스를 선택하여 학생들의 진단 결과를 확인하세요
+            </Typography>
+            <Tooltip title="백엔드 API를 통해 최신 데이터를 가져옵니다" arrow>
+              <Button
+                variant="outlined"
+                startIcon={<Refresh />}
+                onClick={handleRefresh}
+                disabled={loading}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255, 255, 255, 0.5)',
+                  '&:hover': {
+                    borderColor: 'white',
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)'
+                  }
+                }}
+              >
+                새로고침
+              </Button>
+            </Tooltip>
           </Box>
         </Paper>
 
-        {workspaceNames.length === 0 ? (
+        {workspaces.length === 0 ? (
           <Paper sx={{ p: 6, textAlign: 'center' }}>
             <Assessment sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
             <Typography variant="h6" color="text.secondary" gutterBottom>
-              아직 제출된 설문 응답이 없습니다
+              아직 리포트가 있는 워크스페이스가 없습니다
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              학생들이 설문을 완료하면 여기에 결과가 표시됩니다.
+              AI 분석이 완료된 설문이 있는 워크스페이스만 표시됩니다.
             </Typography>
           </Paper>
         ) : (
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 3 }}>
-            {workspaceNames.map((workspaceName) => {
-              const students = workspaceStudents[workspaceName];
-              const avgScore = students.reduce((sum, s) => sum + s.overallScore, 0) / students.length;
-              
-              return (
-                <Card 
-                  key={workspaceName}
-                  sx={{ 
-                    cursor: 'pointer',
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-4px)',
-                      boxShadow: '0 8px 25px rgba(0,0,0,0.15)',
-                    }
-                  }}
-                  onClick={() => setSelectedWorkspace(workspaceName)}
-                >
-                  <CardContent sx={{ p: 3 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <School sx={{ color: '#667eea', mr: 2, fontSize: 32 }} />
-                      <Box>
-                        <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                          {workspaceName}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {students.length}명의 학생
-                        </Typography>
-                      </Box>
+            {workspaces.map((workspaceName) => (
+              <Card 
+                key={workspaceName}
+                sx={{ 
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: '0 8px 25px rgba(0,0,0,0.15)',
+                  }
+                }}
+                onClick={() => handleWorkspaceSelect(workspaceName)}
+              >
+                <CardContent sx={{ p: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <School sx={{ color: '#667eea', mr: 2, fontSize: 32 }} />
+                    <Box>
+                      <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                        {workspaceName}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        클릭하여 설문 목록 보기
+                      </Typography>
                     </Box>
-                    
-                    <Divider sx={{ my: 2 }} />
-                    
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">
-                          평균 점수
-                        </Typography>
-                        <Typography variant="h5" sx={{ 
-                          fontWeight: 700,
-                          color: getScoreColor(avgScore)
-                        }}>
-                          {avgScore.toFixed(1)}
-                        </Typography>
-                      </Box>
-                      <Chip
-                        label={getScoreLevel(avgScore)}
-                        sx={{
-                          backgroundColor: getScoreColor(avgScore),
-                          color: 'white',
-                          fontWeight: 600
-                        }}
-                      />
-                    </Box>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                  </Box>
+                </CardContent>
+              </Card>
+            ))}
           </Box>
         )}
       </Container>
     );
   }
 
-  // 선택된 워크스페이스의 학생 목록
-  const students = workspaceStudents[selectedWorkspace] || [];
-  const selectedCount = Array.from(selectedStudents).filter(key => 
-    key.startsWith(`${selectedWorkspace}-`)
-  ).length;
+  // 설문 선택 화면 (워크스페이스는 선택되었지만 설문이 선택되지 않은 경우)
+  if (currentStep === 'survey-selection') {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Paper sx={{ p: 3, mb: 4, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+          <Button 
+            variant="text" 
+            sx={{ color: 'white', mb: 1 }}
+            onClick={() => navigate('/reports')}
+          >
+            ← 워크스페이스 목록으로
+          </Button>
+          <Typography variant="h4" sx={{ color: 'white', fontWeight: 600 }}>
+            {workspaceId}
+          </Typography>
+          <Typography variant="subtitle1" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
+            설문을 선택하여 AI 분석 결과를 확인하세요
+          </Typography>
+        </Paper>
+
+        {workspaceSurveys.length === 0 ? (
+          <Paper sx={{ p: 6, textAlign: 'center' }}>
+            <Assessment sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              이 워크스페이스에는 AI 분석이 완료된 설문이 없습니다
+            </Typography>
+          </Paper>
+        ) : (
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 3 }}>
+            {workspaceSurveys.map((survey) => (
+              <Card 
+                key={survey.survey_name}
+                sx={{ 
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: '0 8px 25px rgba(0,0,0,0.15)',
+                  }
+                }}
+                onClick={() => handleSurveySelect(survey.survey_name)}
+              >
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                    {survey.survey_name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    AI 분석 완료: {survey.ai_results_count}명
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    전체 응답: {survey.total_students}명
+                  </Typography>
+                </CardContent>
+              </Card>
+            ))}
+          </Box>
+        )}
+      </Container>
+    );
+  }
+
+  // 학생 목록 화면 (워크스페이스와 설문이 모두 선택된 경우)
+  const selectedCount = selectedStudents.size;
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -898,35 +787,37 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
             <Button 
               variant="text" 
               sx={{ color: 'white', mb: 1 }}
-              onClick={() => setSelectedWorkspace('')}
+              onClick={() => navigate('/reports')}
             >
               ← 워크스페이스 목록으로
             </Button>
             <Typography variant="h4" sx={{ color: 'white', fontWeight: 600 }}>
-              {selectedWorkspace}
+              {workspaceId}
             </Typography>
             <Typography variant="subtitle1" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-              {students.length}명의 학생 | {selectedCount}명 선택됨
+              {selectedCount}명 선택됨
             </Typography>
           </Box>
           
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            <Button
-              variant="outlined"
-              startIcon={<Refresh />}
-              onClick={handleRefresh}
-              disabled={loading}
-              sx={{
-                color: 'white',
-                borderColor: 'rgba(255, 255, 255, 0.5)',
-                '&:hover': {
-                  borderColor: 'white',
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)'
-                }
-              }}
-            >
-              새로고침
-            </Button>
+            <Tooltip title="백엔드 API를 통해 최신 데이터를 가져옵니다" arrow>
+              <Button
+                variant="outlined"
+                startIcon={<Refresh />}
+                onClick={handleRefresh}
+                disabled={loading}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255, 255, 255, 0.5)',
+                  '&:hover': {
+                    borderColor: 'white',
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)'
+                  }
+                }}
+              >
+                새로고침
+              </Button>
+            </Tooltip>
           
           {selectedCount > 0 && (
             <Button
@@ -953,28 +844,28 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
         <FormControlLabel
           control={
             <Checkbox
-              checked={students.length > 0 && students.every(s => 
-                selectedStudents.has(`${selectedWorkspace}-${s.studentName}`)
+              checked={studentData.length > 0 && studentData.every(s => 
+                selectedStudents.has(`${workspaceId}-${s.studentName}`)
               )}
               indeterminate={
-                students.some(s => selectedStudents.has(`${selectedWorkspace}-${s.studentName}`)) &&
-                !students.every(s => selectedStudents.has(`${selectedWorkspace}-${s.studentName}`))
+                studentData.some(s => selectedStudents.has(`${workspaceId}-${s.studentName}`)) &&
+                !studentData.every(s => selectedStudents.has(`${workspaceId}-${s.studentName}`))
               }
-              onChange={() => handleSelectAll(selectedWorkspace)}
+              onChange={() => handleSelectAll(workspaceId!)}
               icon={<CheckBoxOutlineBlank />}
               checkedIcon={<CheckBox />}
             />
           }
           label={
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              전체 선택 ({students.length}명)
+              전체 선택 ({studentData.length}명)
             </Typography>
           }
         />
       </Paper>
 
       {/* 학생 목록 */}
-      {students.length === 0 ? (
+      {studentData.length === 0 ? (
         <Paper sx={{ p: 6, textAlign: 'center' }}>
           <Group sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
           <Typography variant="h6" color="text.secondary" gutterBottom>
@@ -983,8 +874,8 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
         </Paper>
       ) : (
         <Box sx={{ display: 'grid', gap: 2 }}>
-          {students.map((student) => {
-            const studentKey = `${selectedWorkspace}-${student.studentName}`;
+          {studentData.map((student) => {
+            const studentKey = `${workspaceId}-${student.studentName}`;
             const isSelected = selectedStudents.has(studentKey);
             
             return (
