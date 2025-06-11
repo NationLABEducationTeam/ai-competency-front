@@ -1,6 +1,5 @@
 import { API_CONFIG, getApiUrl } from '../config/api';
 import { User, Workspace, Survey, Student, Response, Report, ReportSummary, WorkspaceReport } from '../types';
-import axios from 'axios';
 
 // 백엔드 응답 타입 정의
 interface SuccessResponse {
@@ -53,6 +52,108 @@ interface ArchivedSurveysResponse {
     scale_max?: number;
   }>;
   total_count: number;
+}
+
+// 설문 제출 관련 인터페이스
+interface SurveySubmissionStart {
+  respondent_name: string;
+  respondent_email: string;
+}
+
+interface SurveySubmissionComplete {
+  completion_status: 'completed' | 'abandoned';
+  completion_time?: number;
+}
+
+interface SubmissionResponse {
+  submission_id: string;
+  survey_id: string;
+  workspace_id: string;
+  message: string;
+}
+
+interface SubmissionCompleteResponse {
+  submission_id: string;
+  survey_id: string;
+  status: string;
+  completion_time?: number;
+  message: string;
+}
+
+interface SubmissionLog {
+  id: string;
+  workspace_id: string;
+  survey_id: string;
+  survey_title?: string;
+  workspace_title?: string;
+  respondent_name: string;
+  respondent_email: string;
+  submission_date: string;
+  completion_status: 'started' | 'completed' | 'abandoned';
+  completion_time?: number;
+}
+
+interface SurveySubmissionsResponse {
+  survey_id: string;
+  survey_title: string;
+  submissions: SubmissionLog[];
+  total_count: number;
+  completed_count: number;
+  started_count: number;
+  abandoned_count: number;
+}
+
+interface WorkspaceSubmissionsResponse {
+  workspace_id: string;
+  workspace_title: string;
+  submissions: SubmissionLog[];
+  total_count: number;
+  completed_count: number;
+  started_count: number;
+  abandoned_count: number;
+}
+
+interface StudentSubmissionsResponse {
+  student_email: string;
+  student_name: string;
+  workspace_filter?: string;
+  submissions: SubmissionLog[];
+  total_count: number;
+  completed_count: number;
+  started_count: number;
+  abandoned_count: number;
+}
+
+export interface DashboardSummary {
+  total_submissions: number;
+  completion_rate: number;
+  average_score: number;
+}
+
+export interface SurveyStats {
+  survey_id: string;
+  title: string;
+  target: number;
+  completed_count: number;
+  achievement_rate: number;
+  status: string;
+  workspace_title: string;
+}
+
+export interface TimeStats {
+  timestamp: string;
+  response_id: string;
+  survey_title: string;
+  workspace_title: string;
+  status: string;
+}
+
+export interface RecentSubmission {
+  respondent_name: string;
+  survey_title: string;
+  workspace_title: string;
+  submitted_at: string;
+  status: string;
 }
 
 // 기본 fetch 래퍼 함수
@@ -477,48 +578,58 @@ export const assessmentAPI = {
   }
 };
 
-// 대시보드 관련 API
 export const dashboardAPI = {
-  getOverview: async (): Promise<any> => {
-    return apiRequest('/api/v1/dashboard/overview');
-  },
-  
-  getStats: async (): Promise<any> => {
-    return apiRequest('/api/v1/dashboard/stats');
-  },
-
-  getDailyAnalytics: async (): Promise<any> => {
-    return apiRequest('/api/v1/dashboard/analytics/daily');
-  },
-
-  getCompetencyAnalytics: async (): Promise<any> => {
-    return apiRequest('/api/v1/dashboard/analytics/competencies');
-  },
-
-  getDemographics: async (): Promise<any> => {
-    return apiRequest('/api/v1/dashboard/analytics/demographics');
-  },
-
-  getRealtimeStats: async (): Promise<any> => {
-    return apiRequest('/api/v1/dashboard/realtime/today');
-  },
-
-  getCompletionRates: async (): Promise<any> => {
-    return apiRequest('/api/v1/dashboard/analytics/completion');
-  },
-
-  getRecentResponses: async (limit: number = 10): Promise<any> => {
+  getSummary: async (): Promise<DashboardSummary> => {
     try {
-      const response = await apiRequest(`/api/v1/dashboard/responses/recent?limit=${limit}`);
-      console.log('✅ 최근 응답 데이터 로드 성공:', response);
+      const response = await apiRequest<DashboardSummary>('/api/v1/dashboard/summary');
       return response;
     } catch (error) {
-      console.error('❌ 최근 응답 데이터 로드 실패:', error);
-      throw error;
+      console.error('Failed to fetch dashboard summary:', error);
+      return {
+        total_submissions: 0,
+        completion_rate: 0,
+        average_score: 0,
+      };
     }
   },
 
-  // 새로운 대시보드 API 메서드들
+  getSurveyStats: async (params?: { workspace_id?: string }): Promise<SurveyStats[]> => {
+    try {
+      const queryParams = params?.workspace_id ? `?workspace_id=${params.workspace_id}` : '';
+      const response = await apiRequest<SurveyStats[]>(`/api/v1/dashboard/survey-stats${queryParams}`);
+      return response || [];
+    } catch (error) {
+      console.error('Failed to fetch survey stats:', error);
+      return [];
+    }
+  },
+
+  getTimeStats: async (params: { workspace_id?: string; days: number }): Promise<TimeStats[]> => {
+    try {
+      const queryParams = new URLSearchParams();
+      if (params.workspace_id) queryParams.append('workspace_id', params.workspace_id);
+      if (params.days) queryParams.append('days', params.days.toString());
+      const response = await apiRequest<TimeStats[]>(`/api/v1/dashboard/time-stats?${queryParams.toString()}`);
+      return response || [];
+    } catch (error) {
+      console.error('Failed to fetch time stats:', error);
+      return [];
+    }
+  },
+
+  getRecentSubmissions: async (limit: number = 10, params?: { workspace_id?: string }): Promise<RecentSubmission[]> => {
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.append('limit', limit.toString());
+      if (params?.workspace_id) queryParams.append('workspace_id', params.workspace_id);
+      const response = await apiRequest<RecentSubmission[]>(`/api/v1/dashboard/recent-submissions?${queryParams.toString()}`);
+      return response || [];
+    } catch (error) {
+      console.error('Failed to fetch recent submissions:', error);
+      return [];
+    }
+  },
+
   getSubmissionOverview: async (workspaceId?: string): Promise<any> => {
     const url = workspaceId 
       ? `/api/v1/dashboard/submissions/overview?workspace_id=${workspaceId}`
@@ -568,7 +679,6 @@ export const reportAPI = {
     return result;
   },
 
-  // 새로운 Reports API들
   getWorkspaces: async (): Promise<{ workspaces: string[]; total_count: number }> => {
     console.log('📡 리포트 워크스페이스 목록 조회 요청');
     const result = await apiRequest<{ workspaces: string[]; total_count: number }>('/api/v1/reports/workspaces');
@@ -633,7 +743,6 @@ export const reportAPI = {
     return result;
   },
 
-  // AI 결과 파일 내용 다운로드 (JSON 파싱)
   downloadAIResult: async (downloadUrl: string): Promise<any> => {
     console.log('📡 AI 결과 파일 다운로드 요청:', downloadUrl);
     const response = await fetch(downloadUrl);
@@ -689,4 +798,71 @@ export const testConnection = async (): Promise<{ status: string; message: strin
   } catch (error) {
     throw new Error('백엔드 서버에 연결할 수 없습니다.');
   }
+};
+
+// 설문 제출 관련 API
+export const surveySubmissionAPI = {
+  startSubmission: async (surveyId: string, data: SurveySubmissionStart): Promise<SubmissionResponse> => {
+    try {
+      console.log('📝 설문 시작 API 호출:', { surveyId, data });
+      const response = await apiRequest<SubmissionResponse>(`/api/v1/surveys/${surveyId}/submissions/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data),
+      }, true);
+
+      console.log('📝 설문 시작 API 응답:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ 설문 시작 API 호출 실패:', error);
+      throw error;
+    }
+  },
+
+  completeSubmission: async (
+    surveyId: string,
+    submissionId: string,
+    data: SurveySubmissionComplete
+  ): Promise<SubmissionCompleteResponse> => {
+    try {
+      console.log('📝 설문 완료 API 호출:', { surveyId, submissionId, data });
+      const response = await apiRequest<SubmissionCompleteResponse>(
+        `/api/v1/surveys/${surveyId}/submissions/${submissionId}/complete`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data),
+        },
+        true
+      );
+
+      console.log('📝 설문 완료 API 응답:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ 설문 완료 API 호출 실패:', error);
+      throw error;
+    }
+  },
+
+  getSurveySubmissions: async (surveyId: string): Promise<SurveySubmissionsResponse> => {
+    return apiRequest(`/api/v1/surveys/${surveyId}/submissions`);
+  },
+
+  getWorkspaceSubmissions: async (workspaceId: string): Promise<WorkspaceSubmissionsResponse> => {
+    return apiRequest(`/api/v1/surveys/workspace/${workspaceId}/submissions`);
+  },
+
+  getStudentSubmissions: async (
+    studentEmail: string,
+    workspaceId?: string
+  ): Promise<StudentSubmissionsResponse> => {
+    const url = workspaceId
+      ? `/api/v1/surveys/submissions/student/${studentEmail}?workspace_id=${workspaceId}`
+      : `/api/v1/surveys/submissions/student/${studentEmail}`;
+    return apiRequest(url);
+  },
 }; 

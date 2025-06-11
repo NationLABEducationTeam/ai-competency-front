@@ -45,7 +45,9 @@ export const API_CONFIG = {
     
     // 대시보드
     DASHBOARD_OVERVIEW: '/api/v1/dashboard/overview',
-    DASHBOARD_STATS: '/api/v1/dashboard/stats',
+    DASHBOARD_STATS: '/api/v1/dashboard/survey-stats',
+    DASHBOARD_RECENT_SUBMISSIONS: '/api/v1/dashboard/recent-submissions',
+    DASHBOARD_TIME_STATS: '/api/v1/dashboard/time-stats',
     
     // 리포트
     REPORTS: '/api/v1/reports/',

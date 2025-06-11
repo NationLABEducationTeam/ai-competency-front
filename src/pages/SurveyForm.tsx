@@ -24,7 +24,7 @@ import {
   FormControlLabel,
 } from '@mui/material';
 import { CheckCircle } from '@mui/icons-material';
-import { assessmentAPI, surveyAPI } from '../services/apiService';
+import { assessmentAPI, surveyAPI, surveySubmissionAPI } from '../services/apiService';
 import { AIAnalysisService } from '../services/aiAnalysisService';
 import { SQSService } from '../services/sqsService';
 import S3Service from '../services/s3Service';
@@ -90,6 +90,24 @@ const SurveyForm: React.FC = () => {
   // 카운트다운 상태
   const [countdown, setCountdown] = useState<number | null>(null);
 
+  const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [startTime, setStartTime] = useState<number | null>(null);
+
+  // 페이지 이탈 시 설문 중단 처리
+  useEffect(() => {
+    if (submissionId) {
+      const handleBeforeUnload = () => {
+        handleAbandon();
+      };
+
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [submissionId]);
+
+  // 카운트다운 처리
   useEffect(() => {
     if (showFinalModal && countdown !== null && countdown > 0) {
       const timer = setTimeout(() => {
@@ -206,6 +224,99 @@ const SurveyForm: React.FC = () => {
     loadSurveyData();
   }, [surveyId, getSurveyById]);
 
+  // 설문 완료 처리
+  const handleComplete = async () => {
+    try {
+      // AI 분석 요청
+      const analysisResponse = await handleSubmitForAnalysis();
+      
+      setIsCompleted(true);
+      setShowFinalModal(true);
+      setCountdown(5);
+    } catch (error) {
+      console.error('설문 제출 실패:', error);
+      alert('설문 제출 중 오류가 발생했습니다. 다시 시도해주세요.');
+    }
+  };
+
+  // 설문 중단 처리
+  const handleAbandon = async () => {
+    if (submissionId && surveyId) {
+      try {
+        const completionTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined;
+        const response = await surveySubmissionAPI.completeSubmission(surveyId, submissionId, {
+          completion_status: 'abandoned',
+          completion_time: completionTime,
+        });
+        console.log('✅ 설문 중단 처리 성공:', response);
+      } catch (error) {
+        console.error('❌ 설문 중단 처리 실패:', error);
+      }
+    }
+  };
+
+  // 다음 단계로 이동
+  const handleNext = async () => {
+    try {
+      if (currentStep === 0) {
+        // 인적사항 입력 단계
+        const validationError = validateStudentInfo();
+        if (validationError) {
+          alert(validationError);
+          return;
+        }
+
+        if (!surveyId) {
+          throw new Error('설문 ID가 없습니다.');
+        }
+
+        console.log('📝 설문 시작 로그 생성 시도...');
+        // 설문 시작 로그 생성
+        const startResponse = await surveySubmissionAPI.startSubmission(surveyId, {
+          respondent_name: studentInfo.name,
+          respondent_email: studentInfo.email,
+        });
+        
+        if (!startResponse || !startResponse.submission_id) {
+          throw new Error('설문 시작 응답이 올바르지 않습니다.');
+        }
+
+        console.log('✅ 설문 시작 로그 생성 성공:', startResponse);
+        setSubmissionId(startResponse.submission_id);
+        setStartTime(Date.now());
+        setCurrentStep(currentStep + 1);
+      } else if (currentStep < totalPages) {
+        // 설문 응답 단계
+        if (!isStepComplete()) {
+          alert('모든 문항에 답변해주세요.');
+          return;
+        }
+        setCurrentStep(currentStep + 1);
+      } else {
+        // 마지막 단계 - 설문 완료
+        if (!submissionId || !surveyId) {
+          throw new Error('설문 정보가 올바르지 않습니다.');
+        }
+
+        const completionTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined;
+        
+        // 설문 완료 로그 업데이트 (모든 문항을 완료했으므로 completed 상태)
+        const completeResponse = await surveySubmissionAPI.completeSubmission(surveyId, submissionId, {
+          completion_status: 'completed',  // 모든 설문을 완료했으므로 completed
+          completion_time: completionTime,
+        });
+
+        console.log('✅ 설문 완료 처리 성공:', completeResponse);
+        
+        setIsCompleted(true);
+        setShowEmailModal(true);
+      }
+    } catch (error: any) {
+      console.error('❌ 다음 단계 진행 중 오류:', error);
+      alert(error.message || '다음 단계로 진행하는 중 오류가 발생했습니다. 다시 시도해주세요.');
+    }
+  };
+
   // 단계 변경 시 항상 상단으로 스크롤
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -315,145 +426,6 @@ const SurveyForm: React.FC = () => {
     return currentQuestions.every(q => answers[q.id] !== undefined);
   };
 
-  const handleNext = async () => {
-    if (currentStep === 0) {
-      // 개인정보 입력 단계
-      // 필드별 에러 메시지 갱신
-      const errors: typeof fieldErrors = { ...fieldErrors };
-      let hasError = false;
-      (Object.keys(studentInfo) as (keyof StudentInfo)[]).forEach(field => {
-        const msg = validateField(field, studentInfo[field]);
-        errors[field] = msg;
-        if (msg) hasError = true;
-      });
-      setFieldErrors(errors);
-      if (hasError) {
-        alert('모든 항목을 올바르게 입력해주세요.');
-        return;
-      }
-      setCurrentStep(currentStep + 1);
-    } else if (currentStep < steps.length - 1) {
-      // 문항 답변 단계
-      setCurrentStep(currentStep + 1);
-    } else {
-      // 마지막 단계 - 설문 완료
-      try {
-        if (!survey?.id) {
-          console.error('설문 ID가 없습니다');
-          return;
-        }
-
-        // 1. 먼저 S3에 응답 데이터 저장 (AI 분석 없이)
-        // 워크스페이스 정보를 더 안정적으로 가져오기
-        let workspaceName = searchParams.get('workspace');
-        
-        // URL 파라미터에 없으면 설문 데이터나 기타 소스에서 시도
-        if (!workspaceName) {
-          // 설문 ID나 기타 정보에서 워크스페이스 추출 시도
-          if (survey?.id && survey.id.includes('-')) {
-            // 설문 ID가 "workspace-surveyname" 형태인 경우
-            const parts = survey.id.split('-');
-            if (parts.length > 1) {
-              workspaceName = parts[0];
-              console.log('📍 설문 ID에서 워크스페이스 추출:', workspaceName);
-            }
-          }
-          
-          // 여전히 없으면 학생 소속 정보 사용
-          if (!workspaceName && studentInfo.organization) {
-            workspaceName = studentInfo.organization.trim();
-            console.log('📍 학생 소속에서 워크스페이스 설정:', workspaceName);
-          }
-          
-          // 최후의 수단으로 default 사용
-          if (!workspaceName) {
-            workspaceName = 'default-workspace';
-            console.warn('⚠️ 워크스페이스 정보를 찾을 수 없어 default 사용');
-          }
-        }
-        
-        // 설문 폴더명을 워크스페이스와 동일하게 설정 (URL 파라미터가 없을 때)
-        let surveyFolderName = searchParams.get('survey');
-        
-        // URL 파라미터에 없으면 설문 데이터나 기타 소스에서 시도
-        if (!surveyFolderName) {
-          // 워크스페이스 이름과 동일하게 설정 (예: "숙명여대" → "숙명여대_AI역량진단")
-          surveyFolderName = `${workspaceName}_AI역량진단`;
-          console.log('📁 설문 폴더명을 워크스페이스 기반으로 생성:', surveyFolderName);
-        }
-        
-        console.log('📂 S3 저장 경로:', {
-          workspaceName,
-          surveyFolderName,
-          studentName: studentInfo.name.trim()
-        });
-        
-        const s3ResponseData = {
-          surveyId: survey.id,
-          workspaceName: workspaceName,
-          surveyFolderName: surveyFolderName,
-          studentInfo: {
-            name: studentInfo.name.trim(),
-            organization: studentInfo.organization.trim(),
-            age: parseInt(studentInfo.age, 10),
-            email: studentInfo.email.trim(),
-            education: studentInfo.education.trim(),
-            major: studentInfo.major.trim(),
-          },
-          answers: Object.entries(answers).reduce((acc, [qId, score]) => {
-            const question = allQuestions.find(q => q.id === qId);
-            if (question) {
-              acc[question.text] = score;
-            }
-            return acc;
-          }, {} as { [key: string]: number }),
-          submittedAt: new Date().toISOString(),
-          filename: `${studentInfo.name.trim()}.json`,
-          aiAnalysisStatus: 'pending' as 'pending' // AI 분석 상태 추가
-        };
-
-        // S3에 즉시 저장
-        console.log('📤 S3에 응답 데이터 저장 시작...');
-        const s3SaveResult = await S3Service.saveReport(s3ResponseData);
-        
-        if (!s3SaveResult.success) {
-          console.error('❌ S3 저장 실패:', s3SaveResult.error);
-          alert('응답 저장에 실패했습니다. 다시 시도해주세요.');
-          return;
-        }
-        
-        console.log('✅ S3 저장 성공:', s3SaveResult.s3Key);
-
-        // 새로운 백엔드 API로 응답 전송
-        try {
-          const backendResponse = await surveyAPI.submitResponse(survey.id, {
-            respondent_name: studentInfo.name.trim(),
-            respondent_email: studentInfo.email.trim(),
-            respondent_age: parseInt(studentInfo.age, 10),
-            respondent_organization: studentInfo.organization.trim(),
-            respondent_education: studentInfo.education.trim(),
-            respondent_major: studentInfo.major.trim(),
-            answers: Object.entries(answers).map(([questionId, score]) => ({
-              question_id: questionId,
-              score: score
-            })),
-          }, true);
-          console.log('✅ 새로운 백엔드 응답 저장 성공:', backendResponse);
-        } catch (backendError) {
-          // 백엔드 API 실패는 무시하고 계속 진행
-          console.warn('⚠️ 새로운 백엔드 API 저장 실패 (무시하고 계속):', backendError);
-        }
-
-        // 2. 완료 상태로 전환 (Lambda는 "설문 종료" 버튼에서만 호출)
-        setIsCompleted(true);
-        
-      } catch (error) {
-        console.error('설문 제출 중 오류:', error);
-        alert('설문 제출 중 오류가 발생했습니다. 다시 시도해주세요.');
-      }
-    }
-  };
-
   const handleBack = () => {
     if (currentStep > 0) {
       setCurrentStep(prev => prev - 1);
@@ -478,6 +450,115 @@ const SurveyForm: React.FC = () => {
     '& .MuiInputLabel-root.Mui-focused': {
       color: '#667eea',
     }
+  };
+
+  // 설문 제출 및 AI 분석 요청 함수
+  const handleSubmitForAnalysis = async () => {
+    if (!survey?.id) {
+      throw new Error('설문 ID가 없습니다');
+    }
+
+    // 1. 먼저 S3에 응답 데이터 저장 (AI 분석 없이)
+    // 워크스페이스 정보를 더 안정적으로 가져오기
+    let workspaceName = searchParams.get('workspace');
+    
+    // URL 파라미터에 없으면 설문 데이터나 기타 소스에서 시도
+    if (!workspaceName) {
+      // 설문 ID나 기타 정보에서 워크스페이스 추출 시도
+      if (survey?.id && survey.id.includes('-')) {
+        // 설문 ID가 "workspace-surveyname" 형태인 경우
+        const parts = survey.id.split('-');
+        if (parts.length > 1) {
+          workspaceName = parts[0];
+          console.log('📍 설문 ID에서 워크스페이스 추출:', workspaceName);
+        }
+      }
+      
+      // 여전히 없으면 학생 소속 정보 사용
+      if (!workspaceName && studentInfo.organization) {
+        workspaceName = studentInfo.organization.trim();
+        console.log('📍 학생 소속에서 워크스페이스 설정:', workspaceName);
+      }
+      
+      // 최후의 수단으로 default 사용
+      if (!workspaceName) {
+        workspaceName = 'default-workspace';
+        console.warn('⚠️ 워크스페이스 정보를 찾을 수 없어 default 사용');
+      }
+    }
+    
+    // 설문 폴더명을 워크스페이스와 동일하게 설정 (URL 파라미터가 없을 때)
+    let surveyFolderName = searchParams.get('survey');
+    
+    // URL 파라미터에 없으면 설문 데이터나 기타 소스에서 시도
+    if (!surveyFolderName) {
+      // 워크스페이스 이름과 동일하게 설정 (예: "숙명여대" → "숙명여대_AI역량진단")
+      surveyFolderName = `${workspaceName}_AI역량진단`;
+      console.log('📁 설문 폴더명을 워크스페이스 기반으로 생성:', surveyFolderName);
+    }
+    
+    console.log('📂 S3 저장 경로:', {
+      workspaceName,
+      surveyFolderName,
+      studentName: studentInfo.name.trim()
+    });
+    
+    const s3ResponseData = {
+      surveyId: survey.id,
+      workspaceName: workspaceName,
+      surveyFolderName: surveyFolderName,
+      studentInfo: {
+        name: studentInfo.name.trim(),
+        organization: studentInfo.organization.trim(),
+        age: parseInt(studentInfo.age, 10),
+        email: studentInfo.email.trim(),
+        education: studentInfo.education.trim(),
+        major: studentInfo.major.trim(),
+      },
+      answers: Object.entries(answers).reduce((acc, [qId, score]) => {
+        const question = allQuestions.find(q => q.id === qId);
+        if (question) {
+          acc[question.text] = score;
+        }
+        return acc;
+      }, {} as { [key: string]: number }),
+      submittedAt: new Date().toISOString(),
+      filename: `${studentInfo.name.trim()}.json`,
+      aiAnalysisStatus: 'pending' as 'pending' // AI 분석 상태 추가
+    };
+
+    // S3에 즉시 저장
+    console.log('📤 S3에 응답 데이터 저장 시작...');
+    const s3SaveResult = await S3Service.saveReport(s3ResponseData);
+    
+    if (!s3SaveResult.success) {
+      console.error('❌ S3 저장 실패:', s3SaveResult.error);
+      throw new Error('응답 저장에 실패했습니다.');
+    }
+    
+    console.log('✅ S3 저장 성공:', s3SaveResult.s3Key);
+
+    // 새로운 백엔드 API로 응답 전송
+    try {
+      const backendResponse = await surveyAPI.submitResponse(survey.id, {
+        respondent_name: studentInfo.name.trim(),
+        respondent_email: studentInfo.email.trim(),
+        respondent_age: parseInt(studentInfo.age, 10),
+        respondent_organization: studentInfo.organization.trim(),
+        respondent_education: studentInfo.education.trim(),
+        respondent_major: studentInfo.major.trim(),
+        answers: Object.entries(answers).map(([questionId, score]) => ({
+          question_id: questionId,
+          score: score
+        })),
+      }, true);
+      console.log('✅ 새로운 백엔드 응답 저장 성공:', backendResponse);
+    } catch (backendError) {
+      // 백엔드 API 실패는 무시하고 계속 진행
+      console.warn('⚠️ 새로운 백엔드 API 저장 실패 (무시하고 계속):', backendError);
+    }
+
+    return s3SaveResult;
   };
 
   if (isCompleted) {

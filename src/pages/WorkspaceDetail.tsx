@@ -25,6 +25,8 @@ import {
   TextField,
   Menu,
   MenuItem,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Add,
@@ -43,6 +45,7 @@ import {
   Unarchive,
 } from '@mui/icons-material';
 import SurveyCreator from '../components/SurveyCreator';
+import SurveySubmissionLogs from '../components/SurveySubmissionLogs';
 import S3Service, { SurveyResponse } from '../services/s3Service';
 
 interface SurveyData {
@@ -84,6 +87,8 @@ const WorkspaceDetail: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedSurvey, setSelectedSurvey] = useState<SurveyData | null>(null);
   const [isActivating, setIsActivating] = useState(false);
+  const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedSurveyForLogs, setSelectedSurveyForLogs] = useState<SurveyData | null>(null);
 
   // 워크스페이스와 설문 데이터 로드
   useEffect(() => {
@@ -716,8 +721,12 @@ const WorkspaceDetail: React.FC = () => {
     }
   };
 
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setSelectedTab(newValue);
+  };
+
   return (
-    <Box>
+    <Box p={3}>
       <Box sx={{ mb: 3 }}>
         <Breadcrumbs sx={{ mb: 2 }}>
           <Link
@@ -813,231 +822,281 @@ const WorkspaceDetail: React.FC = () => {
         </Box>
       </Box>
 
-      {workspaceSurveys.length === 0 ? (
-        <Box sx={{ 
-          textAlign: 'center', 
-          py: 8,
-          backgroundColor: '#f8f9fa',
-          borderRadius: 3,
-          border: '2px dashed #e2e8f0'
-        }}>
-          <Assignment sx={{ fontSize: 64, color: '#cbd5e0', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-            아직 설문이 없습니다
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            첫 번째 설문을 만들어서 학생들의 AI 역량을 진단해보세요
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => setOpenSurveyCreator(true)}
-            sx={{
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              textTransform: 'none',
-              px: 4,
-              py: 1.5,
-              borderRadius: 2,
-              boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
-              '&:hover': {
-                boxShadow: '0 6px 20px rgba(102, 126, 234, 0.6)',
-              },
-            }}
-          >
-            🚀 첫 설문 만들기
-          </Button>
-        </Box>
-      ) : (
-        <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-          {workspaceSurveys.map((survey) => (
-          <Box key={survey.id} sx={{ flex: '1 1 350px', minWidth: '350px' }}>
-            <Card
-              sx={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                transition: 'all 0.3s',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                },
-              }}
-            >
-              <CardContent sx={{ flexGrow: 1 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                  <Typography variant="h6" sx={{ 
-                    fontWeight: 600, 
-                    flexGrow: 1,
-                  }}>
-                    {survey.title}
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => handleStatusChange(survey.id, survey.isActive)}
-                      disabled={isActivating}
-                      startIcon={survey.isActive ? <Stop /> : <PlayArrow />}
-                      color={survey.isActive ? 'error' : 'success'}
-                      sx={{
-                        textTransform: 'none',
-                        minWidth: 'auto',
-                        px: 1,
-                      }}
-                    >
-                      {survey.isActive ? '비활성화' : '활성화'}
-                    </Button>
-                    <Chip
-                      label={survey.isActive ? '활성' : '비활성'}
-                      size="small"
-                      color={survey.isActive ? 'success' : 'default'}
-                    />
-                  </Box>
-                </Box>
-                
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  {survey.description}
-                </Typography>
+      {/* 탭 추가 */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs value={selectedTab} onChange={handleTabChange}>
+          <Tab label="설문 목록" />
+          <Tab label="제출 현황" />
+        </Tabs>
+      </Box>
 
-                <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <People sx={{ fontSize: 18, mr: 0.5, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">
-                      {survey.responses} 응답
-                    </Typography>
-                  </Box>
-                </Box>
-
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    점수 스케일: 1-{survey.scoreScale}
-                  </Typography>
-                </Box>
-
-                <Box sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: 1, 
-                  p: 1, 
-                  backgroundColor: '#f5f5f7', 
-                  borderRadius: 1,
-                  cursor: !survey.isActive ? 'not-allowed' : 'pointer',
-                  border: '1px solid transparent',
-                  opacity: !survey.isActive ? 0.6 : 1,
-                  '&:hover': !survey.isActive ? {} : { 
-                    backgroundColor: '#e8e8ea',
-                    borderColor: '#667eea'
-                  }
+      {/* 설문 목록 탭 */}
+      {selectedTab === 0 && (
+        <Box>
+          {workspaceSurveys.length === 0 ? (
+            <Box sx={{ 
+              textAlign: 'center', 
+              py: 8,
+              backgroundColor: '#f8f9fa',
+              borderRadius: 3,
+              border: '2px dashed #e2e8f0'
+            }}>
+              <Assignment sx={{ fontSize: 64, color: '#cbd5e0', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+                아직 설문이 없습니다
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                첫 번째 설문을 만들어서 학생들의 AI 역량을 진단해보세요
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => setOpenSurveyCreator(true)}
+                sx={{
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  textTransform: 'none',
+                  px: 4,
+                  py: 1.5,
+                  borderRadius: 2,
+                  boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+                  '&:hover': {
+                    boxShadow: '0 6px 20px rgba(102, 126, 234, 0.6)',
+                  },
                 }}
-                onClick={(e) => {
-                  if (!survey.isActive) {
-                    e.preventDefault();
-                    showSnackbar('비활성화된 설문의 링크는 복사할 수 없습니다.', 'error');
-                    return;
-                  }
-                  copyToClipboard(survey.link);
-                }}
-                title={!survey.isActive ? '비활성화된 설문입니다' : '클릭하여 링크 복사'}
+              >
+                🚀 첫 설문 만들기
+              </Button>
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+              {workspaceSurveys.map((survey) => (
+              <Box key={survey.id} sx={{ flex: '1 1 350px', minWidth: '350px' }}>
+                <Card
+                  sx={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    transition: 'all 0.3s',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                    },
+                  }}
                 >
-                  <LinkIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                  <Typography variant="caption" color="text.secondary" sx={{ flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {survey.link.startsWith('http') ? survey.link : `${window.location.origin}${survey.link}`}
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: !survey.isActive ? '#e53e3e' : '#667eea', fontSize: '10px' }}>
-                    {!survey.isActive ? '링크 비활성화됨' : '📋 복사'}
-                  </Typography>
-                </Box>
+                  <CardContent sx={{ flexGrow: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                      <Typography variant="h6" sx={{ 
+                        fontWeight: 600, 
+                        flexGrow: 1,
+                      }}>
+                        {survey.title}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => handleStatusChange(survey.id, survey.isActive)}
+                          disabled={isActivating}
+                          startIcon={survey.isActive ? <Stop /> : <PlayArrow />}
+                          color={survey.isActive ? 'error' : 'success'}
+                          sx={{
+                            textTransform: 'none',
+                            minWidth: 'auto',
+                            px: 1,
+                          }}
+                        >
+                          {survey.isActive ? '비활성화' : '활성화'}
+                        </Button>
+                        <Chip
+                          label={survey.isActive ? '활성' : '비활성'}
+                          size="small"
+                          color={survey.isActive ? 'success' : 'default'}
+                        />
+                      </Box>
+                    </Box>
+                    
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                      {survey.description}
+                    </Typography>
 
-                {/* 설문 접속 버튼들 */}
-                <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-                  {survey.isActive ? (
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => {
-                        const fullUrl = survey.link.startsWith('http') ? survey.link : `${window.location.origin}${survey.link}`;
-                        window.open(fullUrl, '_blank');
-                      }}
-                      sx={{
-                        background: 'linear-gradient(135deg, #48bb78 0%, #38a169 100%)',
-                        textTransform: 'none',
-                        fontSize: '12px',
-                        px: 2,
-                        py: 0.5,
-                        '&:hover': {
-                          background: 'linear-gradient(135deg, #38a169 0%, #2f855a 100%)',
-                        },
-                      }}
-                    >
-                      🚀 설문 시작하기
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="contained"
-                      size="small"
-                      disabled
-                      sx={{
-                        background: '#e53e3e',
-                        textTransform: 'none',
-                        fontSize: '12px',
-                        px: 2,
-                        py: 0.5,
-                        '&.Mui-disabled': {
-                          background: '#e53e3e',
-                          color: 'white',
-                        },
-                      }}
-                    >
-                      ⏸️ 설문 비활성화됨
-                    </Button>
-                  )}
-                  
-                  {/* 링크 복사 버튼 - 비활성화 상태에서는 비활성화 */}
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={() => {
+                    <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <People sx={{ fontSize: 18, mr: 0.5, color: 'text.secondary' }} />
+                        <Typography variant="body2" color="text.secondary">
+                          {survey.responses} 응답
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        점수 스케일: 1-{survey.scoreScale}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 1, 
+                      p: 1, 
+                      backgroundColor: '#f5f5f7', 
+                      borderRadius: 1,
+                      cursor: !survey.isActive ? 'not-allowed' : 'pointer',
+                      border: '1px solid transparent',
+                      opacity: !survey.isActive ? 0.6 : 1,
+                      '&:hover': !survey.isActive ? {} : { 
+                        backgroundColor: '#e8e8ea',
+                        borderColor: '#667eea'
+                      }
+                    }}
+                    onClick={(e) => {
                       if (!survey.isActive) {
+                        e.preventDefault();
                         showSnackbar('비활성화된 설문의 링크는 복사할 수 없습니다.', 'error');
                         return;
                       }
                       copyToClipboard(survey.link);
                     }}
-                    disabled={!survey.isActive}
-                    sx={{
-                      textTransform: 'none',
-                      fontSize: '12px',
-                      px: 2,
-                      py: 0.5,
-                      borderColor: '#667eea',
-                      color: '#667eea',
-                      opacity: !survey.isActive ? 0.6 : 1,
-                      '&:hover': {
-                        borderColor: '#5a67d8',
-                        backgroundColor: '#f0f4ff',
-                      },
-                      '&.Mui-disabled': {
-                        borderColor: '#cbd5e0',
-                        color: '#718096',
-                      }
-                    }}
-                  >
-                    {!survey.isActive ? '링크 비활성화됨' : '📋 링크 복사'}
-                  </Button>
-                </Box>
-              </CardContent>
-              
-              <CardActions sx={{ p: 2, pt: 0, justifyContent: 'flex-end' }}>
-                <IconButton
-                  size="small"
-                  onClick={(e) => handleMenuOpen(e, survey)}
+                    title={!survey.isActive ? '비활성화된 설문입니다' : '클릭하여 링크 복사'}
+                    >
+                      <LinkIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      <Typography variant="caption" color="text.secondary" sx={{ flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {survey.link.startsWith('http') ? survey.link : `${window.location.origin}${survey.link}`}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: !survey.isActive ? '#e53e3e' : '#667eea', fontSize: '10px' }}>
+                        {!survey.isActive ? '링크 비활성화됨' : '📋 복사'}
+                      </Typography>
+                    </Box>
+
+                    {/* 설문 접속 버튼들 */}
+                    <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                      {survey.isActive ? (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => {
+                            const fullUrl = survey.link.startsWith('http') ? survey.link : `${window.location.origin}${survey.link}`;
+                            window.open(fullUrl, '_blank');
+                          }}
+                          sx={{
+                            background: 'linear-gradient(135deg, #48bb78 0%, #38a169 100%)',
+                            textTransform: 'none',
+                            fontSize: '12px',
+                            px: 2,
+                            py: 0.5,
+                            '&:hover': {
+                              background: 'linear-gradient(135deg, #38a169 0%, #2f855a 100%)',
+                            },
+                          }}
+                        >
+                          🚀 설문 시작하기
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          disabled
+                          sx={{
+                            background: '#e53e3e',
+                            textTransform: 'none',
+                            fontSize: '12px',
+                            px: 2,
+                            py: 0.5,
+                            '&.Mui-disabled': {
+                              background: '#e53e3e',
+                              color: 'white',
+                            },
+                          }}
+                        >
+                          ⏸️ 설문 비활성화됨
+                        </Button>
+                      )}
+                      
+                      {/* 링크 복사 버튼 - 비활성화 상태에서는 비활성화 */}
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => {
+                          if (!survey.isActive) {
+                            showSnackbar('비활성화된 설문의 링크는 복사할 수 없습니다.', 'error');
+                            return;
+                          }
+                          copyToClipboard(survey.link);
+                        }}
+                        disabled={!survey.isActive}
+                        sx={{
+                          textTransform: 'none',
+                          fontSize: '12px',
+                          px: 2,
+                          py: 0.5,
+                          borderColor: '#667eea',
+                          color: '#667eea',
+                          opacity: !survey.isActive ? 0.6 : 1,
+                          '&:hover': {
+                            borderColor: '#5a67d8',
+                            backgroundColor: '#f0f4ff',
+                          },
+                          '&.Mui-disabled': {
+                            borderColor: '#cbd5e0',
+                            color: '#718096',
+                          }
+                        }}
+                      >
+                        {!survey.isActive ? '링크 비활성화됨' : '📋 링크 복사'}
+                      </Button>
+                    </Box>
+                  </CardContent>
+                  
+                  <CardActions sx={{ p: 2, pt: 0, justifyContent: 'flex-end' }}>
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleMenuOpen(e, survey)}
+                    >
+                      <MoreVert />
+                    </IconButton>
+                  </CardActions>
+                </Card>
+              </Box>
+            ))}
+            </Box>
+          )}
+        </Box>
+      )}
+
+      {/* 제출 현황 탭 */}
+      {selectedTab === 1 && (
+        <Box>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+            <Typography variant="h5" component="h2">
+              제출 현황
+            </Typography>
+            {workspaceSurveys.length > 0 && (
+              <Box>
+                <TextField
+                  select
+                  label="설문 선택"
+                  value={selectedSurveyForLogs?.id || ''}
+                  onChange={(e) => {
+                    const survey = workspaceSurveys.find(s => s.id === e.target.value);
+                    setSelectedSurveyForLogs(survey || null);
+                  }}
+                  sx={{ minWidth: 200 }}
                 >
-                  <MoreVert />
-                </IconButton>
-              </CardActions>
-            </Card>
+                  <MenuItem value="">전체 설문</MenuItem>
+                  {workspaceSurveys.map((survey) => (
+                    <MenuItem key={survey.id} value={survey.id}>
+                      {survey.title}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
+            )}
           </Box>
-        ))}
+
+          <SurveySubmissionLogs
+            workspaceId={!selectedSurveyForLogs ? workspaceId : undefined}
+            surveyId={selectedSurveyForLogs?.id}
+          />
         </Box>
       )}
 
