@@ -168,16 +168,22 @@ const SubmissionTrend: React.FC<SubmissionTrendProps> = ({ workspaceId }) => {
             dataKey="date"
             tickFormatter={formatDate}
             stroke="#94a3b8"
+            interval="preserveStartEnd"
+            minTickGap={50}
+            tick={{ fontSize: 12 }}
           />
           <YAxis
             stroke="#94a3b8"
             tickFormatter={(value) => value.toFixed(0)}
             domain={calculateYAxisDomain(data)}
             allowDecimals={false}
+            tick={{ fontSize: 12 }}
+            width={35}
           />
           <Tooltip
             labelFormatter={(value) => format(parseISO(value), 'PPP', { locale: ko })}
             content={CustomTooltip}
+            cursor={{ stroke: '#94a3b8', strokeWidth: 1 }}
           />
           <Area
             type="monotone"
@@ -186,8 +192,8 @@ const SubmissionTrend: React.FC<SubmissionTrendProps> = ({ workspaceId }) => {
             stroke="#6366f1"
             strokeWidth={2}
             fill="url(#colorCount)"
-            dot={{ fill: '#6366f1', strokeWidth: 2 }}
-            activeDot={{ r: 8, fill: '#818cf8' }}
+            dot={{ fill: '#6366f1', strokeWidth: 2, r: 4 }}
+            activeDot={{ r: 6, fill: '#818cf8' }}
           />
         </AreaChart>
       </ResponsiveContainer>

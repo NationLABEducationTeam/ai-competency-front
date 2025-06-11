@@ -158,6 +158,7 @@ const DailySubmissions: React.FC<DailySubmissionsProps> = ({ workspaceId }) => {
             left: 20,
             bottom: 5,
           }}
+          barSize={20}
         >
           <defs>
             <linearGradient id="colorDaily" x1="0" y1="0" x2="0" y2="1">
@@ -170,16 +171,22 @@ const DailySubmissions: React.FC<DailySubmissionsProps> = ({ workspaceId }) => {
             dataKey="date"
             tickFormatter={formatDate}
             stroke="#94a3b8"
+            interval="preserveStartEnd"
+            minTickGap={50}
+            tick={{ fontSize: 12 }}
           />
           <YAxis
             stroke="#94a3b8"
             tickFormatter={(value) => value.toFixed(0)}
             domain={calculateYAxisDomain(data)}
             allowDecimals={false}
+            tick={{ fontSize: 12 }}
+            width={35}
           />
           <Tooltip
             labelFormatter={(value) => format(parseISO(value), 'PPP', { locale: ko })}
             content={CustomTooltip}
+            cursor={{ fill: 'rgba(139, 92, 246, 0.1)' }}
           />
           <Bar
             dataKey="count"
