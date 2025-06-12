@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -93,20 +93,30 @@ const SurveyForm: React.FC = () => {
   const [submissionId, setSubmissionId] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
 
-  // 페이지 이탈 시 설문 중단 처리
-  useEffect(() => {
-    if (submissionId) {
-      const handleBeforeUnload = () => {
-        handleAbandon();
-      };
+  // --- 진행률 표시 개선 로직 ---
+  const mainSteps = ['인적사항 작성', '역량진단 설문', '진단 완료'];
+  const activeMainStep = isCompleted ? 2 : (currentStep > 0 ? 1 : 0);
 
-      window.addEventListener('beforeunload', handleBeforeUnload);
-      return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload);
+  const { progressValue, progressLabel } = useMemo(() => {
+    if (activeMainStep === 0) {
+      return {
+        progressValue: 0, // Value for LinearProgress, but it won't be shown for this step
+        progressLabel: '인적사항을 입력해주세요.'
       };
     }
-  }, [submissionId]);
+    if (activeMainStep === 1) {
+      const value = totalPages > 0 ? (currentStep / totalPages) * 100 : 0;
+      return {
+        progressValue: value,
+        progressLabel: `역량진단 설문 (${currentStep}/${totalPages})`
+      };
+    }
+    // '진단 완료' 단계
+    return { progressValue: 100, progressLabel: '진단이 완료되었습니다.' };
+  }, [activeMainStep, studentInfo, currentStep, totalPages]);
+  // --- 종료 ---
 
+  // 페이지 이탈 시 설문 중단 처리
   // 카운트다운 처리
   useEffect(() => {
     if (showFinalModal && countdown !== null && countdown > 0) {
@@ -226,15 +236,31 @@ const SurveyForm: React.FC = () => {
 
   // 설문 완료 처리
   const handleComplete = async () => {
+    if (!surveyId || !submissionId) {
+      console.error('Survey ID or Submission ID is missing for handleComplete');
+      alert('오류: 설문 정보를 찾을 수 없습니다. 다시 시도해주세요.');
+      return;
+    }
     try {
-      // AI 분석 요청
-      const analysisResponse = await handleSubmitForAnalysis();
-      
+      // 1. Submit answers and potentially trigger AI analysis (S3 save, etc.)
+      await handleSubmitForAnalysis();
+
+      // 2. Explicitly mark submission as 'completed' via API
+      const completionTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined;
+      await surveySubmissionAPI.completeSubmission(surveyId, submissionId, {
+        completion_status: 'completed',
+        completion_time: completionTime,
+      });
+      console.log('✅ 설문 완료 상태 API 전송 성공');
+
+      // 3. Update local state after successful API call
       setIsCompleted(true);
       setShowFinalModal(true);
       setCountdown(5);
+
     } catch (error) {
-      console.error('설문 제출 실패:', error);
+      console.error('설문 제출 또는 완료 처리 실패:', error);
+      // Consider if a more specific error message or a retry for completeSubmission is needed
       alert('설문 제출 중 오류가 발생했습니다. 다시 시도해주세요.');
     }
   };
@@ -254,6 +280,23 @@ const SurveyForm: React.FC = () => {
       }
     }
   };
+
+  // 페이지 이탈 시 설문 중단 처리 (handleAbandon 뒤로 이동)
+  useEffect(() => {
+    if (submissionId) {
+      const handleBeforeUnload = () => {
+        // If survey is already marked as completed locally, do not call handleAbandon
+        if (!isCompleted) {
+          handleAbandon();
+        }
+      };
+
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [submissionId, isCompleted, handleAbandon]);
 
   // 다음 단계로 이동
   const handleNext = async () => {
@@ -381,7 +424,7 @@ const SurveyForm: React.FC = () => {
     );
   }
 
-  const steps = ['개인정보', ...Array.from({ length: totalPages }, (_, i) => `단계 ${i + 1}`)];
+  // const steps = ['개인정보', ...Array.from({ length: totalPages }, (_, i) => `단계 ${i + 1}`)]; // Deprecated by new mainSteps
 
   // 인적사항 입력 검증 함수 (필드별)
   const validateField = (field: keyof StudentInfo, value: string) => {
@@ -432,7 +475,7 @@ const SurveyForm: React.FC = () => {
     }
   };
 
-  const progress = ((currentStep + 1) / steps.length) * 100;
+
 
   // 공통 TextField 스타일
   const textFieldStyle = {
@@ -1028,109 +1071,31 @@ const SurveyForm: React.FC = () => {
               </Typography> */}
             </Box>
             
-            {/* 진행률 섹션 */}
-            <Box sx={{ 
-              mb: { xs: 2, md: 4 }, 
-              p: { xs: 2, md: 3 }, 
-              backgroundColor: '#f8f9ff', 
-              borderRadius: 2,
-              border: '1px solid #e0e7ff'
-            }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, color: '#4c51bf', fontSize: { xs: '1.1rem', md: '1.25rem' } }}>
-                  진행률
-                </Typography>
-                <Box sx={{ 
-                  px: 2, 
-                  py: 0.5, 
-                  backgroundColor: '#667eea', 
-                  borderRadius: 20,
-                  color: 'white'
-                }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600, fontSize: { xs: '0.75rem', md: '0.875rem' } }}>
-                    {Math.round(progress)}%
-                  </Typography>
+            {/* --- 진행률 표시 개선 UI --- */}
+            <Stepper activeStep={activeMainStep} alternativeLabel sx={{ mb: 2 }}>
+              {mainSteps.map((label) => (
+                <Step key={label}>
+                  <StepLabel>{label}</StepLabel>
+                </Step>
+              ))}
+            </Stepper>
+
+            <Box sx={{ mb: 4, px: { xs: 0, sm: 4 } }}>
+              {activeMainStep !== 0 && (
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                  <Box sx={{ width: '100%', mr: 1 }}>
+                    <LinearProgress variant="determinate" value={progressValue} sx={{ height: 8, borderRadius: 5 }} />
+                  </Box>
+                  <Box sx={{ minWidth: 35 }}>
+                    <Typography variant="body2" color="text.secondary">{`${Math.round(progressValue)}%`}</Typography>
+                  </Box>
                 </Box>
-              </Box>
-              <LinearProgress 
-                variant="determinate" 
-                value={progress} 
-                sx={{ 
-                  height: { xs: 8, md: 12 }, 
-                  borderRadius: 6,
-                  backgroundColor: 'rgba(102, 126, 234, 0.15)',
-                  '& .MuiLinearProgress-bar': {
-                    background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-                    borderRadius: 6,
-                    boxShadow: '0 2px 4px rgba(102, 126, 234, 0.3)',
-                  }
-                }} 
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', fontSize: { xs: '0.7rem', md: '0.75rem' } }}>
-                {currentStep === 0 ? '개인정보를 입력해주세요' : '각 문항을 신중히 읽고 답변해주세요'}
+              )}
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
+                {progressLabel}
               </Typography>
             </Box>
-
-            {/* 단계 표시 - 모바일에서 간소화 */}
-            <Box sx={{ mb: { xs: 2, md: 4 }, display: { xs: 'none', sm: 'block' } }}>
-              <Stepper 
-                activeStep={currentStep} 
-                sx={{ 
-                  '& .MuiStepIcon-root': {
-                    fontSize: '1.5rem',
-                    '&.Mui-active': {
-                      color: '#667eea',
-                    },
-                    '&.Mui-completed': {
-                      color: '#48bb78',
-                    }
-                  },
-                  '& .MuiStepLabel-label': {
-                    fontSize: '0.875rem',
-                    fontWeight: 500,
-                    '&.Mui-active': {
-                      color: '#667eea',
-                      fontWeight: 600,
-                    }
-                  },
-                  '& .MuiStepConnector-line': {
-                    borderColor: '#e2e8f0',
-                    borderTopWidth: 2,
-                  },
-                  '& .Mui-active .MuiStepConnector-line': {
-                    borderColor: '#667eea',
-                  },
-                  '& .Mui-completed .MuiStepConnector-line': {
-                    borderColor: '#48bb78',
-                  }
-                }}
-              >
-                {steps.map((label, index) => (
-                  <Step key={label}>
-                    <StepLabel>
-                      <Typography variant="body2" sx={{ 
-                        fontWeight: currentStep === index ? 600 : 400,
-                        color: currentStep === index ? '#667eea' : 'text.secondary',
-                        display: { xs: 'none', md: 'block' }
-                      }}>
-                        {index === 0 ? label : `단계 ${index}`}
-                      </Typography>
-                    </StepLabel>
-                  </Step>
-                ))}
-              </Stepper>
-            </Box>
-
-            {/* 모바일용 간단한 단계 표시 */}
-            <Box sx={{ mb: 2, display: { xs: 'block', sm: 'none' }, textAlign: 'center' }}>
-              <Typography variant="h6" sx={{ 
-                fontWeight: 600, 
-                color: '#667eea',
-                mb: 1
-              }}>
-                {currentStep === 0 ? '개인정보 입력' : `단계 ${currentStep} / ${totalPages}`}
-              </Typography>
-            </Box>
+            {/* --- 종료 --- */}
           </Box>
 
           {currentStep === 0 ? (
@@ -1581,7 +1546,7 @@ const SurveyForm: React.FC = () => {
               variant="contained"
               onClick={handleNext}
               disabled={!isStepComplete()}
-              endIcon={<span>{currentStep === steps.length - 1 ? '✓' : '→'}</span>}
+              endIcon={<span>{(activeMainStep === 1 && currentStep === totalPages) ? '✓' : '→'}</span>}
               sx={{
                 background: isStepComplete() 
                   ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
@@ -1611,7 +1576,7 @@ const SurveyForm: React.FC = () => {
                 }
               }}
             >
-              {currentStep === steps.length - 1 ? '설문 완료' : '다음 단계'}
+              {(activeMainStep === 1 && currentStep === totalPages) ? '설문 완료' : '다음 단계'}
             </Button>
           </Box>
         </Paper>
