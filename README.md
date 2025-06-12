@@ -111,23 +111,6 @@ npm run build
 - 5문항씩 단계별 진행
 - 진행률 표시 및 스테퍼
 
-## 🔧 환경 설정
-
-### AWS 연동 (예정)
-- **RDS**: 사용자 정보 저장
-- **S3**: 설문 데이터 및 리포트 저장
-- **Bedrock**: AI 기반 평가 및 리포트 생성
-
-### 데이터베이스 연결 정보
-```javascript
-// RDS 연결 정보 (백엔드)
-const connection = {
-  host: "competency-db.cjik2cuykhtl.ap-northeast-2.rds.amazonaws.com",
-  user: "admin",
-  password: "dkanrjsk1!A",
-  database: "competency"
-}
-```
 
 ## 📝 개발 가이드라인
 
@@ -146,16 +129,3 @@ const connection = {
 - 일관된 색상 팔레트 적용
 - 그라데이션 및 그림자 효과 활용
 
-## 🔮 향후 계획
-
-- [ ] 차트 라이브러리 연동 (Chart.js/Recharts)
-- [ ] 백엔드 API 연동
-- [ ] AWS 서비스 통합
-- [ ] PDF 생성 기능 구현
-- [ ] 엑셀 업로드 기능
-- [ ] 실시간 알림 시스템
-- [ ] 다국어 지원
-
-## 📄 라이선스
-
-이 프로젝트는 MIT 라이선스 하에 배포됩니다.

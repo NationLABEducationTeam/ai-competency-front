@@ -20,8 +20,6 @@ import {
   DialogContent,
   DialogActions,
   Radio,
-  RadioGroup,
-  FormControlLabel,
 } from '@mui/material';
 import { CheckCircle } from '@mui/icons-material';
 import { assessmentAPI, surveyAPI, surveySubmissionAPI } from '../services/apiService';
