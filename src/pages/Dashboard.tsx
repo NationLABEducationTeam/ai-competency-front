@@ -105,7 +105,7 @@ const Dashboard: React.FC = () => {
             }}
           >
             <Typography variant="h6" sx={{ mb: 2 }}>설문별 참여율</Typography>
-            <SurveyStats workspaceId={currentWorkspace?.id} />
+            <SurveyStats />
           </Paper>
 
           <Box 

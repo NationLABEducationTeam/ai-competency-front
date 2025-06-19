@@ -266,7 +266,7 @@ const Login: React.FC = () => {
                 color: '#333',
                 lineHeight: 1.2,
               }}>
-                AI Assessment
+                AITRACK
               </Typography>
               <Typography variant="body2" sx={{ 
                 color: '#666',

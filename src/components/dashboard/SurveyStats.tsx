@@ -15,12 +15,17 @@ import {
   LinearProgress,
   Chip,
   useTheme,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { InfoOutlined } from '@mui/icons-material';
 import { dashboardAPI, SurveyStats as SurveyStatsType } from '../../services/apiService';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 
 interface SurveyStatsProps {
-  workspaceId?: string;
+  // workspaceId is no longer needed as we'll fetch all and filter internally
 }
 
 const getStatusChipColor = (status: string) => {
@@ -35,7 +40,7 @@ const getStatusChipColor = (status: string) => {
       return {
         bgColor: 'rgba(100, 116, 139, 0.1)',
         textColor: '#475569',
-        label: '준비중'
+        label: '작성중'
       };
     case 'inactive':
     case 'closed':
@@ -60,21 +65,27 @@ const getProgressColor = (rate: number): 'success' | 'warning' | 'primary' | 'er
   return 'error';
 };
 
-export function SurveyStats({ workspaceId }: SurveyStatsProps) {
+export function SurveyStats({}: SurveyStatsProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<SurveyStatsType[]>([]);
+  const [allSurveyStats, setAllSurveyStats] = useState<SurveyStatsType[]>([]);
+  const [displayStats, setDisplayStats] = useState<SurveyStatsType[]>([]);
+  const { workspaces, fetchWorkspaces, loading: workspacesLoading } = useWorkspaceStore();
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('all');
   useTheme();
+
+  useEffect(() => {
+    fetchWorkspaces();
+  }, [fetchWorkspaces]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         const response = await dashboardAPI.getSurveyStats({ 
-          workspace_id: workspaceId, 
           include_all: true 
         });
-        setStats(response);
+        setAllSurveyStats(response);
         setError(null);
       } catch (err) {
         console.error('설문 통계 데이터 로드 실패:', err);
@@ -85,9 +96,25 @@ export function SurveyStats({ workspaceId }: SurveyStatsProps) {
     };
 
     fetchData();
-  }, [workspaceId]);
+  }, []);
 
-  if (loading) {
+  useEffect(() => {
+    if (selectedWorkspaceId === 'all') {
+      setDisplayStats(allSurveyStats);
+    } else {
+      const selectedWorkspace = workspaces.find(ws => ws.id === selectedWorkspaceId);
+      if (selectedWorkspace) {
+        const filtered = allSurveyStats.filter(
+          stat => stat.workspace_title === selectedWorkspace.title
+        );
+        setDisplayStats(filtered);
+      } else {
+        setDisplayStats(allSurveyStats);
+      }
+    }
+  }, [selectedWorkspaceId, allSurveyStats, workspaces]);
+
+  if (loading || workspacesLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight={400}>
         <CircularProgress />
@@ -95,7 +122,7 @@ export function SurveyStats({ workspaceId }: SurveyStatsProps) {
     );
   }
 
-  if (error || !stats || stats.length === 0) {
+  if (error || !displayStats || displayStats.length === 0) {
     return (
       <Paper elevation={0} sx={{ p: 4, textAlign: 'center' }}>
         <Typography color="text.secondary">{error || '표시할 설문 데이터가 없습니다.'}</Typography>
@@ -114,6 +141,20 @@ export function SurveyStats({ workspaceId }: SurveyStatsProps) {
             <InfoOutlined sx={{ fontSize: 18 }} />
           </IconButton>
         </Tooltip>
+        <Box sx={{ flexGrow: 1 }} />
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel>워크스페이스 필터</InputLabel>
+          <Select
+            value={selectedWorkspaceId}
+            label="워크스페이스 필터"
+            onChange={(e) => setSelectedWorkspaceId(e.target.value as string)}
+          >
+            <MenuItem value="all">전체 워크스페이스</MenuItem>
+            {workspaces.map((ws) => (
+              <MenuItem key={ws.id} value={ws.id}>{ws.title}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Box>
 
       <TableContainer>
@@ -126,7 +167,7 @@ export function SurveyStats({ workspaceId }: SurveyStatsProps) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {stats.map((survey) => {
+            {displayStats.map((survey) => {
               const chipColors = getStatusChipColor(survey.status);
               return (
                 <TableRow key={survey.survey_id} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
