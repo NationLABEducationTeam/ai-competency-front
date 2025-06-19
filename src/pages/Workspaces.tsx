@@ -42,7 +42,7 @@ interface WorkspaceStats {
 
 const Workspaces: React.FC = () => {
   const navigate = useNavigate();
-  const { workspaces, addWorkspace, updateWorkspace, deleteWorkspace, setWorkspaces } = useWorkspaceStore();
+  const { workspaces, addWorkspace, updateWorkspace, deleteWorkspace, fetchWorkspaces, loading } = useWorkspaceStore();
   const [openDialog, setOpenDialog] = useState(false);
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(null);
@@ -50,7 +50,6 @@ const Workspaces: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [workspaceStats, setWorkspaceStats] = useState<Record<string, WorkspaceStats>>({});
   
@@ -110,21 +109,8 @@ const Workspaces: React.FC = () => {
 
   // 워크스페이스 목록 로드
   useEffect(() => {
-    const loadWorkspaces = async () => {
-      try {
-        setLoading(true);
-        const data = await workspaceAPI.getAll();
-        setWorkspaces(data);
-      } catch (error: any) {
-        console.error('워크스페이스 로드 실패:', error);
-        showSnackbar('워크스페이스를 불러오는데 실패했습니다.', 'error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadWorkspaces();
-  }, [setWorkspaces]);
+    fetchWorkspaces();
+  }, [fetchWorkspaces]);
 
   // 워크스페이스 로드 후 통계 계산
   useEffect(() => {
@@ -187,14 +173,6 @@ const Workspaces: React.FC = () => {
       // 로컬 상태에서 제거
       deleteWorkspace(workspaceToDelete.id);
       
-      // 서버에서 최신 워크스페이스 목록 다시 로드
-      try {
-        const updatedWorkspaces = await workspaceAPI.getAll();
-        setWorkspaces(updatedWorkspaces);
-      } catch (reloadError) {
-        console.error('워크스페이스 목록 재로드 실패:', reloadError);
-      }
-      
       showSnackbar('워크스페이스가 삭제되었습니다.', 'success');
       setOpenDeleteDialog(false);
       setWorkspaceToDelete(null);
@@ -232,7 +210,7 @@ const Workspaces: React.FC = () => {
         await workspaceAPI.update(editingWorkspace.id, updateData);
         
         // 로컬 상태 업데이트
-        updateWorkspace(editingWorkspace.id, {
+        updateWorkspace({
           ...editingWorkspace,
           title: formData.title,
           description: formData.description,

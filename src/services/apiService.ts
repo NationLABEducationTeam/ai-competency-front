@@ -1,5 +1,6 @@
 import { API_CONFIG, getApiUrl } from '../config/api';
 import { User, Workspace, Survey, Student, Response, Report, ReportSummary, WorkspaceReport } from '../types';
+import useAlertStore from '../store/uiStore';
 
 // 백엔드 응답 타입 정의
 interface SuccessResponse {
@@ -205,17 +206,20 @@ const apiRequest = async <T>(
         localStorage.removeItem('access_token');
         localStorage.removeItem('user');
         
-        // 현재 경로 저장 (로그인 후 돌아갈 경로)
+        // 로그인 후 돌아갈 경로 저장
         const currentPath = window.location.pathname + window.location.search;
         if (currentPath !== '/login') {
           localStorage.setItem('redirectAfterLogin', currentPath);
         }
         
-        // 사용자에게 알림
-        alert('세션이 만료되었습니다. 다시 로그인해주세요.');
-        
-        // 로그인 페이지로 리다이렉트
-        window.location.href = '/login';
+        // Zustand 스토어를 통해 알림 모달 열기
+        useAlertStore.getState().openAlert(
+          '세션 만료',
+          '세션이 만료되었습니다. 보안을 위해 다시 로그인해주세요.',
+          () => {
+            window.location.href = '/login';
+          }
+        );
         
         // 더 이상 진행하지 않도록 에러 던지기
         throw new Error('Session expired');
@@ -287,14 +291,15 @@ export const workspaceAPI = {
     try {
       // 먼저 is_active=true 쿼리로 시도
       const result = await apiRequest<Workspace[]>('/api/v1/workspaces/?is_active=true');
-      return result;
+      return result || [];
     } catch (error) {
       console.warn('is_active 쿼리 실패, 전체 목록에서 필터링 시도:', error);
       try {
         // 백엔드에서 is_active를 지원하지 않는 경우 전체 목록을 가져와서 필터링
         const allWorkspaces = await apiRequest<Workspace[]>('/api/v1/workspaces/');
+        const filteredWorkspaces = allWorkspaces || [];
         // is_active 필드가 존재하면 필터링, 없으면 전체 반환
-        return allWorkspaces.filter((workspace: any) => 
+        return filteredWorkspaces.filter((workspace: any) => 
           workspace.is_active !== false && workspace.status !== 'deleted'
         );
       } catch (fallbackError) {
@@ -593,10 +598,14 @@ export const dashboardAPI = {
     }
   },
 
-  getSurveyStats: async (params?: { workspace_id?: string }): Promise<SurveyStats[]> => {
+  getSurveyStats: async (params?: { workspace_id?: string; include_all?: boolean }): Promise<SurveyStats[]> => {
     try {
-      const queryParams = params?.workspace_id ? `?workspace_id=${params.workspace_id}` : '';
-      const response = await apiRequest<SurveyStats[]>(`/api/v1/dashboard/survey-stats${queryParams}`);
+      const queryParams = new URLSearchParams();
+      if (params?.workspace_id) queryParams.append('workspace_id', params.workspace_id);
+      if (params?.include_all) queryParams.append('include_all', 'true');
+      
+      const queryString = queryParams.toString();
+      const response = await apiRequest<SurveyStats[]>(`/api/v1/dashboard/survey-stats${queryString ? `?${queryString}` : ''}`);
       return response || [];
     } catch (error) {
       console.error('Failed to fetch survey stats:', error);

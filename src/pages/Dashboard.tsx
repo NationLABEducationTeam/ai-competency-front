@@ -5,7 +5,6 @@ import RecentResponses from '../components/dashboard/RecentResponses';
 import { Box, Typography, Paper, Container, useTheme, alpha } from '@mui/material';
 import { Assessment, CheckCircle, TrendingUp, Group } from '@mui/icons-material';
 import StatCard from '../components/dashboard/StatCard';
-import SubmissionTrend from '../components/dashboard/SubmissionTrend';
 import DailySubmissions from '../components/dashboard/DailySubmissions';
 import { SurveyStats } from '../components/dashboard/SurveyStats';
 
@@ -14,6 +13,11 @@ interface DashboardSummary {
   completion_rate: number;
   average_score: number;
 }
+
+const estimatedActiveUsers = (total_submissions: number, completion_rate: number) => {
+  return Math.round(total_submissions * completion_rate);
+};
+
 
 const Dashboard: React.FC = () => {
   const theme = useTheme();
@@ -84,7 +88,7 @@ const Dashboard: React.FC = () => {
           />
           <StatCard
             title="활성 사용자"
-            value={loading ? '-' : '계산 중...'}
+            value={loading ? '-' : estimatedActiveUsers(summary.total_submissions, summary.completion_rate)}
             icon={Group}
             trend={12.3}
             color="info"
@@ -117,8 +121,8 @@ const Dashboard: React.FC = () => {
                 backdropFilter: 'blur(6px)'
               }}
             >
-              <Typography variant="h6" sx={{ mb: 2 }}>설문 제출 추이</Typography>
-              <SubmissionTrend workspaceId={currentWorkspace?.id} />
+              <Typography variant="h6" sx={{ mb: 2 }}>일별 제출 현황</Typography>
+              <DailySubmissions workspaceId={currentWorkspace?.id} />
             </Paper>
             <Paper 
               sx={{ 
@@ -132,16 +136,6 @@ const Dashboard: React.FC = () => {
               <RecentResponses workspaceId={currentWorkspace?.id} />
             </Paper>
           </Box>
-          <Paper 
-            sx={{ 
-              p: 3,
-              background: alpha(theme.palette.background.paper, 0.8),
-              backdropFilter: 'blur(6px)'
-            }}
-          >
-            <Typography variant="h6" sx={{ mb: 2 }}>일별 제출 현황</Typography>
-            <DailySubmissions workspaceId={currentWorkspace?.id} />
-          </Paper>
         </Box>
       </Container>
     </Box>

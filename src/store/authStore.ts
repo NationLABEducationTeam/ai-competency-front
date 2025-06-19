@@ -1,74 +1,56 @@
 import { create } from 'zustand';
 import { User } from '../types';
+import useAlertStore from './uiStore';
 
-interface AuthState {
-  user: User | null;
+export interface AuthState {
   isAuthenticated: boolean;
+  user: User | null;
+  token: string | null;
+  initialized: boolean; // 인증 상태 확인 완료 여부
   login: (token: string, user: User) => void;
   logout: () => void;
-  setUser: (user: User | null) => void;
-  checkAuth: () => boolean;
+  checkAuth: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
   isAuthenticated: false,
-  
-  login: (token: string, user: User) => {
-    // localStorage에 인증 정보 저장
+  user: null,
+  token: localStorage.getItem('access_token'),
+  initialized: false,
+  login: (token, user) => {
     localStorage.setItem('access_token', token);
+    localStorage.setItem('user', JSON.stringify(user));
     localStorage.setItem('token_type', 'Bearer');
-    localStorage.setItem('user_data', JSON.stringify(user));
-    
-    set({ user, isAuthenticated: true });
+    set({ isAuthenticated: true, user, token });
   },
-  
   logout: () => {
-    // 토큰 및 사용자 정보 제거
     localStorage.removeItem('access_token');
+    localStorage.removeItem('user');
     localStorage.removeItem('token_type');
-    localStorage.removeItem('user_data');
-    set({ user: null, isAuthenticated: false });
+    set({ user: null, isAuthenticated: false, token: null });
+
+    useAlertStore.getState().openAlert(
+      '로그아웃',
+      '성공적으로 로그아웃되었습니다. 로그인 페이지로 이동합니다.',
+      () => {
+        window.location.href = '/login';
+      }
+    );
   },
-  
-  setUser: (user) => {
-    set({ user, isAuthenticated: !!user });
-  },
-  
   checkAuth: () => {
     try {
-      // 토큰이 있는지 확인
       const token = localStorage.getItem('access_token');
-      const userData = localStorage.getItem('user_data');
-      
-      console.log('checkAuth 실행:', { 
-        hasToken: !!token, 
-        hasUserData: !!userData, 
-        currentAuth: get().isAuthenticated 
-      });
-      
-      if (token && userData) {
-        try {
-          const user = JSON.parse(userData);
-          set({ user, isAuthenticated: true });
-          console.log('인증 상태 복원 성공:', user);
-          return true;
-        } catch (error) {
-          console.error('사용자 데이터 파싱 실패:', error);
-          // 파싱 실패 시 로그아웃 처리
-          get().logout();
-          return false;
-        }
+      const userString = localStorage.getItem('user');
+      if (token && userString) {
+        set({ isAuthenticated: true, user: JSON.parse(userString), token });
       } else {
-        // 토큰이나 사용자 데이터가 없는 경우 로그아웃 상태로 설정
-        console.log('토큰 또는 사용자 데이터 없음, 로그아웃 상태로 설정');
-        get().logout();
-        return false;
+        set({ isAuthenticated: false, user: null, token: null });
       }
     } catch (error) {
-      console.error('checkAuth 실행 중 오류:', error);
-      get().logout();
-      return false;
+      console.error("Auth check failed:", error);
+      set({ isAuthenticated: false, user: null, token: null });
+    } finally {
+      set({ initialized: true });
     }
   },
 })); 
