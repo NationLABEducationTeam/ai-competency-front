@@ -554,14 +554,12 @@ AI 분야는 지속적인 학습과 실습이 중요한 영역입니다. 기초 
 
   // 워크스페이스 선택 핸들러
   const handleWorkspaceSelect = async (workspaceName: string) => {
-    console.log('🏢 워크스페이스 선택:', workspaceName);
-    navigate(`/reports/workspace/${encodeURIComponent(workspaceName)}`);
+    navigate(`/reports/${encodeURIComponent(workspaceName)}`);
   };
 
   // 설문 선택 핸들러
   const handleSurveySelect = async (surveyName: string) => {
-    console.log('📋 설문 선택:', surveyName);
-    navigate(`/reports/workspace/${encodeURIComponent(workspaceId!)}/survey/${encodeURIComponent(surveyName)}`);
+    navigate(`/reports/${encodeURIComponent(workspaceId!)}/${encodeURIComponent(surveyName)}`);
   };
 
   // 데이터 새로고침 함수 (URL 기반으로 전체 데이터 재로드)

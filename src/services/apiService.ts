@@ -217,7 +217,7 @@ const apiRequest = async <T>(
           '세션 만료',
           '세션이 만료되었습니다. 보안을 위해 다시 로그인해주세요.',
           () => {
-            window.location.href = '/login';
+        window.location.href = '/login';
           }
         );
         

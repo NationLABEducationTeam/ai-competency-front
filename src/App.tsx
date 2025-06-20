@@ -14,7 +14,7 @@ import Workspaces from './pages/Workspaces';
 import WorkspaceDetail from './pages/WorkspaceDetail';
 import SurveyForm from './pages/SurveyForm';
 import ThankYou from './pages/ThankYou';
-import ReportDetail from './pages/ReportDetail';
+// import ReportDetail from './pages/ReportDetail';
 import Settings from './pages/Settings';
 import Trash from './pages/Trash';
 import Reports from './pages/Reports';
@@ -28,7 +28,7 @@ function App() {
   const { initialized, checkAuth } = useAuthStore();
 
   useEffect(() => {
-    checkAuth();
+        checkAuth();
   }, [checkAuth]);
 
   if (!initialized) {
@@ -49,7 +49,9 @@ function App() {
             <Route path="workspaces" element={<Workspaces />} />
             <Route path="workspaces/:workspaceId" element={<WorkspaceDetail />} />
             <Route path="reports" element={<Reports />} />
-            <Route path="reports/detail/:reportId" element={<ReportDetail />} />
+            <Route path="reports/:workspaceId" element={<Reports />} />
+            <Route path="reports/:workspaceId/:surveyId" element={<Reports />} />
+            {/* <Route path="reports/detail/:reportId" element={<ReportDetail />} /> */}
             <Route path="trash" element={<Trash />} />
             <Route path="settings" element={<Settings />} />
             <Route index element={<Navigate to="/dashboard" replace />} />

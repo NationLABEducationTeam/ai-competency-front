@@ -141,7 +141,7 @@ const DailySubmissions: React.FC<DailySubmissionsProps> = ({ workspaceId }) => {
     const maxDomain = maxCount < 5 ? 5 : Math.ceil(maxCount / 5) * 5;
     return [0, maxDomain];
   };
-
+  
   const handleTimeWindowChange = (
     event: React.MouseEvent<HTMLElement>,
     newTimeWindow: TimeWindow | null,
@@ -152,32 +152,32 @@ const DailySubmissions: React.FC<DailySubmissionsProps> = ({ workspaceId }) => {
   };
 
   const renderChart = () => {
-    if (loading) {
-      return (
+  if (loading) {
+    return (
         <Box display="flex" justifyContent="center" alignItems="center" minHeight={300}>
           <CircularProgress />
-        </Box>
-      );
-    }
+      </Box>
+    );
+  }
 
     if (error || chartData.length === 0) {
-      return (
-        <Paper
-          elevation={0}
-          sx={{
-            p: 6, borderRadius: 3, border: '1px solid #f1f5f9', textAlign: 'center',
-            background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-            minHeight: 300, display: 'flex', justifyContent: 'center', alignItems: 'center'
-          }}
-        >
-          <Typography variant="body1" color="text.secondary">
-            {error || '해당 기간 동안 제출된 설문이 없습니다.'}
-          </Typography>
-        </Paper>
-      );
-    }
-
     return (
+      <Paper
+        elevation={0}
+        sx={{
+          p: 6, borderRadius: 3, border: '1px solid #f1f5f9', textAlign: 'center',
+          background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+            minHeight: 300, display: 'flex', justifyContent: 'center', alignItems: 'center'
+        }}
+      >
+        <Typography variant="body1" color="text.secondary">
+          {error || '해당 기간 동안 제출된 설문이 없습니다.'}
+        </Typography>
+      </Paper>
+    );
+  }
+
+  return (
       <div style={{ height: 300 }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
