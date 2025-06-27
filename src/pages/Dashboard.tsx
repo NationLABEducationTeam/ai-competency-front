@@ -40,7 +40,7 @@ const Dashboard: React.FC = () => {
         setError(null);
       } catch (err) {
         console.error('대시보드 요약 데이터 로드 실패:', err);
-        setError('데이터를 불러오는데 실패했습니다.');
+        setError('데이터를 불러오는데 실패했습니다!');
       } finally {
         setLoading(false);
       }
