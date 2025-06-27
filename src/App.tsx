@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { useAuthStore } from './store/authStore';
-import { theme } from './theme'; // 테마 분리 가정
+import { theme } from './theme'; // 테마 분리 가정ㄴㄴㄴㄴㄴ
 import AlertDialog from './components/common/AlertDialog';
 import DashboardLayout from './components/Layout/DashboardLayout';
 
