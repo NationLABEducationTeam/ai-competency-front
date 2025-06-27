@@ -9,7 +9,6 @@ import {
   Avatar,
   Divider,
   CircularProgress,
-  Paper,
   IconButton,
   Tooltip,
 } from '@mui/material';

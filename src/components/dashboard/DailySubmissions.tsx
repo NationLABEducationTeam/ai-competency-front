@@ -8,7 +8,6 @@ import {
   ToggleButton,
 } from '@mui/material';
 import {
-  BarChart as BarChartIcon,
 } from '@mui/icons-material';
 import {
   AreaChart,

@@ -21,8 +21,6 @@ import {
   Menu as MenuIcon,
   LightbulbCircle,
   FolderOutlined,
-  QuestionAnswerOutlined,
-  PeopleOutlined,
   InsertChartOutlined,
   SettingsOutlined,
   LogoutOutlined,

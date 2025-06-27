@@ -17,8 +17,6 @@ import {
   List,
   ListItem,
   ListItemText,
-  ListItemSecondaryAction,
-  IconButton,
 } from '@mui/material';
 import {
   Person,
@@ -26,7 +24,6 @@ import {
   Notifications,
   Storage,
   Delete,
-  Edit,
 } from '@mui/icons-material';
 import { useAuthStore } from '../store/authStore';
 

@@ -65,7 +65,7 @@ const getProgressColor = (rate: number): 'success' | 'warning' | 'primary' | 'er
   return 'error';
 };
 
-export function SurveyStats({}: SurveyStatsProps) {
+export function SurveyStats(_props: SurveyStatsProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [allSurveyStats, setAllSurveyStats] = useState<SurveyStatsType[]>([]);

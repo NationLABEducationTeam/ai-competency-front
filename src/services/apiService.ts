@@ -1,5 +1,5 @@
-import { API_CONFIG, getApiUrl } from '../config/api';
-import { User, Workspace, Survey, Student, Response, Report, ReportSummary, WorkspaceReport } from '../types';
+import { API_CONFIG } from '../config/api';
+import { User, Workspace, Survey, ReportSummary, WorkspaceReport } from '../types';
 import useAlertStore from '../store/uiStore';
 
 // 백엔드 응답 타입 정의
@@ -264,6 +264,12 @@ export const authAPI = {
     return apiRequest('/api/v1/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
+    });
+  },
+  
+  devLogin: async (): Promise<{ user: User, access_token: string }> => {
+    return apiRequest('/api/v1/auth/dev-login', {
+      method: 'POST',
     });
   },
   
