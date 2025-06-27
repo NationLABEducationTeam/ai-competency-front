@@ -31,4 +31,4 @@ jobs:
           aws-region: 'ap-northeast-2'
 
       - name: Deploy to production S3
-        run: aws s3 sync dist s3://competency-surveys-platform --delete 
+        run: aws s3 sync build s3://competency-surveys-platform --delete 
