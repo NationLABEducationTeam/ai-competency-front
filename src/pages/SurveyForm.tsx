@@ -129,6 +129,9 @@ const SurveyForm: React.FC = () => {
   }, [showFinalModal, countdown]);
 
   // 설문 데이터 로드
+// SurveyForm.tsx의 설문 데이터 로드 부분에 추가할 코드
+
+// 설문 데이터 로드 (기존 useEffect 수정)
   useEffect(() => {
     const loadSurveyData = async () => {
       if (!surveyId) {
@@ -139,8 +142,61 @@ const SurveyForm: React.FC = () => {
       
       console.log('🔍 SurveyForm - surveyId:', surveyId);
       
+      // URL 파라미터에서 워크스페이스와 파일명 가져오기
+      const workspaceName = searchParams.get('workspace');
+      const filename = searchParams.get('file');
+      
+      console.log('📂 URL 파라미터:', {
+        workspace: workspaceName,
+        file: filename
+      });
+      
       try {
         setLoading(true);
+        
+        // 1. URL 파라미터가 있으면 S3에서 엑셀 파일 로드 시도
+        if (workspaceName && filename) {
+          console.log('📥 S3에서 엑셀 파일 로드 시도:', { workspaceName, filename });
+          
+          try {
+            const s3Result = await S3Service.downloadAndParseExcel(workspaceName, filename);
+            
+            if (s3Result.success && s3Result.data) {
+              console.log('✅ S3 엑셀 파일 로드 성공:', s3Result.data.length, '개 문항');
+              
+              // S3에서 가져온 문항으로 설문 구성
+              const s3Survey = {
+                id: surveyId,
+                title: `${workspaceName} AI 역량 진단`,
+                description: `${workspaceName}의 맞춤형 AI 역량 진단 설문입니다`,
+                scoreScale: 5,
+                questions: s3Result.data.map((q: any) => ({
+                  id: q.id,
+                  text: q.text,
+                  category: q.category,
+                  type: 'scale' as const,
+                  options: ['전혀 아니다', '아니다', '보통이다', '그렇다', '매우 그렇다']
+                })),
+                link: `/survey/${surveyId}`,
+                createdAt: new Date(),
+                isActive: true,
+                responses: 0,
+              };
+              
+              console.log('📝 S3 기반 설문 데이터:', s3Survey);
+              setSurvey(s3Survey);
+              setAllQuestions(s3Result.data);
+              setLoading(false);
+              return; // S3 로드 성공시 여기서 종료
+            } else {
+              console.warn('⚠️ S3 엑셀 파일 로드 실패:', s3Result.error);
+            }
+          } catch (s3Error) {
+            console.error('❌ S3 엑셀 파일 로드 오류:', s3Error);
+          }
+        }
+        
+        // 2. S3 로드 실패시 백엔드 API 시도
         console.log('📡 백엔드 API 호출 시작...');
         
         try {
@@ -171,12 +227,12 @@ const SurveyForm: React.FC = () => {
             text: q.text,
             category: q.category,
           })));
-          console.log('📋 설정된 문항들:', allQuestions);
           
         } catch (backendError: any) {
           console.warn('⚠️ 백엔드 로드 실패:', backendError);
           console.log('🔄 로컬 스토어에서 시도...');
           
+          // 3. 백엔드 실패시 로컬 스토어 시도
           const localSurvey = getSurveyById(surveyId);
           console.log('💾 로컬 스토어 데이터:', localSurvey);
           
@@ -191,6 +247,7 @@ const SurveyForm: React.FC = () => {
           } else {
             console.warn('⚠️ 로컬에서도 못찾음, 기본 설문 사용');
             
+            // 4. 최후의 수단: 기본 설문 사용
             const defaultSurvey = getSurveyById('ai-competency-assessment');
             console.log('🔄 기본 AI 역량 진단 설문:', defaultSurvey);
             
@@ -198,7 +255,7 @@ const SurveyForm: React.FC = () => {
               const fallbackSurvey = {
                 ...defaultSurvey,
                 id: surveyId,
-                title: 'AI 기반 직무역량 자가진단 설문',
+                title: workspaceName ? `${workspaceName} AI 역량 진단` : 'AI 기반 직무역량 자가진단 설문',
                 description: 'AI/데이터 기본 이해부터 윤리 및 거버넌스까지 종합적인 AI 역량을 진단합니다',
               };
               
@@ -230,7 +287,7 @@ const SurveyForm: React.FC = () => {
     };
 
     loadSurveyData();
-  }, [surveyId, getSurveyById]);
+  }, [surveyId, getSurveyById, searchParams]); // searchParams 의존성 추가
 
   // 설문 완료 처리
   const handleComplete = async () => {
