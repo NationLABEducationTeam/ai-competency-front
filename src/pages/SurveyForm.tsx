@@ -145,52 +145,77 @@ const SurveyForm: React.FC = () => {
       // URL 파라미터에서 워크스페이스와 파일명 가져오기
       const workspaceName = searchParams.get('workspace');
       const filename = searchParams.get('file');
-      
+
       console.log('📂 URL 파라미터:', {
         workspace: workspaceName,
         file: filename
       });
-      
+
       try {
         setLoading(true);
         
         // 1. URL 파라미터가 있으면 S3에서 엑셀 파일 로드 시도
-        if (workspaceName && filename) {
+        if (workspaceName) {  // ✅ filename 조건 제거
           console.log('📥 S3에서 엑셀 파일 로드 시도:', { workspaceName, filename });
           
           try {
-            const s3Result = await S3Service.downloadAndParseExcel(workspaceName, filename);
+            let actualFilename = filename;
             
-            if (s3Result.success && s3Result.data) {
-              console.log('✅ S3 엑셀 파일 로드 성공:', s3Result.data.length, '개 문항');
+            // 파일명이 없거나 기본값이면 자동 탐지
+            if (!actualFilename || actualFilename === 'survey.xlsx') {
+              console.log('📁 S3에서 실제 엑셀 파일 자동 탐지 시작...');
               
-              // S3에서 가져온 문항으로 설문 구성
-              const s3Survey = {
-                id: surveyId,
-                title: `${workspaceName} AI 역량 진단`,
-                description: `${workspaceName}의 맞춤형 AI 역량 진단 설문입니다`,
-                scoreScale: 5,
-                questions: s3Result.data.map((q: any) => ({
-                  id: q.id,
-                  text: q.text,
-                  category: q.category,
-                  type: 'scale' as const,
-                  options: ['전혀 아니다', '아니다', '보통이다', '그렇다', '매우 그렇다']
-                })),
-                link: `/survey/${surveyId}`,
-                createdAt: new Date(),
-                isActive: true,
-                responses: 0,
-              };
+              // S3에서 해당 워크스페이스의 모든 파일 목록 가져오기
+              const excelFiles = await S3Service.listSurveyFiles(workspaceName);
+              console.log('📋 발견된 엑셀 파일들:', excelFiles);
               
-              console.log('📝 S3 기반 설문 데이터:', s3Survey);
-              setSurvey(s3Survey);
-              setAllQuestions(s3Result.data);
-              setLoading(false);
-              return; // S3 로드 성공시 여기서 종료
-            } else {
-              console.warn('⚠️ S3 엑셀 파일 로드 실패:', s3Result.error);
+              if (excelFiles.length > 0) {
+                // 첫 번째 엑셀 파일 사용
+                actualFilename = excelFiles[0];
+                console.log('✅ 자동 선택된 파일:', actualFilename);
+              } else {
+                console.warn('⚠️ 워크스페이스에 엑셀 파일이 없음');
+              }
             }
+            
+            // 실제 파일로 다운로드 시도
+            if (actualFilename) {
+              console.log('📥 실제 파일 다운로드 시도:', actualFilename);
+              
+              const s3Result = await S3Service.downloadAndParseExcel(workspaceName, actualFilename);
+              
+              if (s3Result.success && s3Result.data) {
+                console.log('✅ S3 엑셀 파일 로드 성공:', s3Result.data.length, '개 문항');
+                
+                // S3에서 가져온 문항으로 설문 구성
+                const s3Survey = {
+                  id: surveyId,
+                  title: `${workspaceName} AI 역량 진단`,
+                  description: `${workspaceName}의 맞춤형 AI 역량 진단 설문입니다`,
+                  scoreScale: 5,
+                  questions: s3Result.data.map((q: any) => ({
+                    id: q.id,
+                    text: q.text,
+                    category: q.category,
+                    type: 'scale' as const,
+                    options: ['전혀 아니다', '아니다', '보통이다', '그렇다', '매우 그렇다']
+                  })),
+                  link: `/survey/${surveyId}`,
+                  createdAt: new Date(),
+                  isActive: true,
+                  responses: 0,
+                };
+                
+                console.log('📝 S3 기반 설문 데이터:', s3Survey);
+                setSurvey(s3Survey);
+                setAllQuestions(s3Result.data);
+                setLoading(false);
+                return; // S3 로드 성공시 여기서 종료
+              } else {
+                console.warn('⚠️ S3 엑셀 파일 로드 실패:', s3Result.error);
+              }
+            }
+            
           } catch (s3Error) {
             console.error('❌ S3 엑셀 파일 로드 오류:', s3Error);
           }
