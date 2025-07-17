@@ -7,8 +7,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 const AWS_CONFIG = {
   accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY_ID,  // 실제 AWS Access Key ID
   secretAccessKey: process.env.REACT_APP_AWS_SECRET_ACCESS_KEY,  // 실제 AWS Secret Access Key
-  region: process.env.REACT_APP_AWS_REGION,
-  bucketName: process.env.REACT_APP_S3_BUCKET_NAME,  // 설문 폼과 응답 저장용 버킷
+  region: "ap-northeast-2",
+  bucketName: "competency-surveys",  // 설문 폼과 응답 저장용 버킷
   // 프로덕션용 Cognito 설정
   cognitoIdentityPoolId: '',
 };
