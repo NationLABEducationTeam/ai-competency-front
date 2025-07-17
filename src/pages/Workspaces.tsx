@@ -65,8 +65,8 @@ const Workspaces: React.FC = () => {
       console.log('📊 워크스페이스별 통계 계산 시작');
       
       // S3에서 모든 응답 데이터 가져오기
-      const allResponses = await S3Service.listAllReports();
-      console.log('📊 로드된 전체 응답 수:', allResponses.length);
+      // const allResponses = await S3Service.listAllReports();
+      // console.log('📊 로드된 전체 응답 수:', allResponses.length);
       
       // 모든 설문 데이터 가져오기
       const allSurveys = await surveyAPI.getAll();
@@ -93,14 +93,14 @@ const Workspaces: React.FC = () => {
       });
       
       // 응답 수 계산 (워크스페이스명별)
-      allResponses.forEach(response => {
-        if (stats[response.workspaceName]) {
-          stats[response.workspaceName].responseCount++;
-        }
-      });
+      // allResponses.forEach(response => {
+      //   if (stats[response.workspaceName]) {
+      //     stats[response.workspaceName].responseCount++;
+      //   }
+      // });
       
-      console.log('📊 계산된 워크스페이스 통계:', stats);
-      setWorkspaceStats(stats);
+      // console.log('📊 계산된 워크스페이스 통계:', stats);
+      // setWorkspaceStats(stats);
       
     } catch (error) {
       console.error('워크스페이스 통계 계산 실패:', error);
@@ -113,11 +113,11 @@ const Workspaces: React.FC = () => {
   }, [fetchWorkspaces]);
 
   // 워크스페이스 로드 후 통계 계산
-  useEffect(() => {
-    if (workspaces.length > 0) {
-      calculateWorkspaceStats();
-    }
-  }, [workspaces]);
+  // useEffect(() => {
+  //   if (workspaces.length > 0) {
+  //     calculateWorkspaceStats();
+  //   }
+  // }, [workspaces]);
 
   const showSnackbar = (message: string, severity: 'success' | 'error') => {
     setSnackbar({ open: true, message, severity });
