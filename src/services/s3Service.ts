@@ -593,7 +593,7 @@ class S3Service {
       summary: string;
     }
   ): Promise<S3UploadResult> {
-    console.warn('⚠️ saveResponseWithAIAnalysis는 deprecated입니다. saveReportWithAIAnalysis 사용을 권장합니다.');
+    console.warn('⚠️ saveResponseWithAIAnalysis는 deprecated입니다. saveReportWithAIAnalysis 사용을 권장합니다!!');
     return this.saveReportWithAIAnalysis(responseData, aiAnalysisResult);
   }
 
