@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -22,7 +22,7 @@ import {
   Radio,
 } from '@mui/material';
 import { CheckCircle } from '@mui/icons-material';
-import { assessmentAPI, surveyAPI, surveySubmissionAPI } from '../services/apiService';
+import { surveyAPI, surveySubmissionAPI } from '../services/apiService';
 import { AIAnalysisService } from '../services/aiAnalysisService';
 import { SQSService } from '../services/sqsService';
 import S3Service from '../services/s3Service';
@@ -58,14 +58,16 @@ const SurveyForm: React.FC = () => {
     age: '',
     email: '',
     education: '',
-    major: '',
+    major: ''
   });
   const [answers, setAnswers] = useState<{ [key: string]: number }>({});
   const [isCompleted, setIsCompleted] = useState(false);
   const [survey, setSurvey] = useState<any>(null);
   const [allQuestions, setAllQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [showAbandonModal, setShowAbandonModal] = useState(false);
+
   const questionsPerPage = 5;
   const totalPages = Math.ceil(allQuestions.length / questionsPerPage);
 
@@ -129,184 +131,77 @@ const SurveyForm: React.FC = () => {
   }, [showFinalModal, countdown]);
 
   // 설문 데이터 로드
-// SurveyForm.tsx의 설문 데이터 로드 부분에 추가할 코드
-
-// 설문 데이터 로드 (기존 useEffect 수정)
   useEffect(() => {
     const loadSurveyData = async () => {
+      setLoading(true);
+      setError(null);
+
       if (!surveyId) {
-        console.log('❌ surveyId가 없음');
+        console.error('❌ surveyId가 URL에 없습니다.');
+        setError('설문 ID가 유효하지 않습니다. 링크를 확인해주세요.');
         setLoading(false);
         return;
       }
-      
-      console.log('🔍 SurveyForm - surveyId:', surveyId);
-      
-      // URL 파라미터에서 워크스페이스와 파일명 가져오기
+
       const workspaceName = searchParams.get('workspace');
       const filename = searchParams.get('file');
+      const surveyTitle = searchParams.get('surveyTitle');
+      
+      console.log('🔍 URL 파라미터 확인:');
+      console.log('- workspace:', workspaceName);
+      console.log('- file:', filename);
+      console.log('- surveyTitle:', surveyTitle);
+      console.log('- 예상 S3 경로:', `forms/${workspaceName}/${surveyTitle}/${filename}`);
 
-      console.log('📂 URL 파라미터:', {
-        workspace: workspaceName,
-        file: filename
-      });
+      if (!workspaceName || !filename || !surveyTitle) {
+        console.error('❌ S3 로드에 필요한 URL 파라미터(workspace, file, surveyTitle)가 부족합니다.');
+        setError('설문을 불러오기 위한 정보가 부족합니다. 링크가 올바른지 확인해주세요.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('🔍 SurveyForm - surveyId:', surveyId);
+      console.log('📂 URL 파라미터:', { workspace: workspaceName, file: filename, surveyTitle: surveyTitle });
 
       try {
-        setLoading(true);
-        
-        // 1. URL 파라미터가 있으면 S3에서 엑셀 파일 로드 시도
-        if (workspaceName) {  // ✅ filename 조건 제거
-          console.log('📥 S3에서 엑셀 파일 로드 시도:', { workspaceName, filename });
+        console.log('📥 S3에서 지정된 엑셀 파일 로드 시도:', { workspaceName, filename, surveyTitle });
+        const s3Result = await S3Service.downloadAndParseExcel(workspaceName, filename, surveyTitle);
+
+        if (s3Result.success && s3Result.data) {
+          console.log('✅ S3 엑셀 파일 로드 성공:', s3Result.data.length, '개 문항');
           
-          try {
-            let actualFilename = filename;
-            
-            // 파일명이 없거나 기본값이면 자동 탐지
-            if (!actualFilename || actualFilename === 'survey.xlsx') {
-              console.log('📁 S3에서 실제 엑셀 파일 자동 탐지 시작...');
-              
-              // S3에서 해당 워크스페이스의 모든 파일 목록 가져오기
-              const excelFiles = await S3Service.listSurveyFiles(workspaceName);
-              console.log('📋 발견된 엑셀 파일들:', excelFiles);
-              
-              if (excelFiles.length > 0) {
-                // 첫 번째 엑셀 파일 사용
-                actualFilename = excelFiles[0];
-                console.log('✅ 자동 선택된 파일:', actualFilename);
-              } else {
-                console.warn('⚠️ 워크스페이스에 엑셀 파일이 없음');
-              }
-            }
-            
-            // 실제 파일로 다운로드 시도
-            if (actualFilename) {
-              console.log('📥 실제 파일 다운로드 시도:', actualFilename);
-              
-              const s3Result = await S3Service.downloadAndParseExcel(workspaceName, actualFilename);
-              
-              if (s3Result.success && s3Result.data) {
-                console.log('✅ S3 엑셀 파일 로드 성공:', s3Result.data.length, '개 문항');
-                
-                // S3에서 가져온 문항으로 설문 구성
-                const s3Survey = {
-                  id: surveyId,
-                  title: `${workspaceName} AI 역량 진단`,
-                  description: `${workspaceName}의 맞춤형 AI 역량 진단 설문입니다`,
-                  scoreScale: 5,
-                  questions: s3Result.data.map((q: any) => ({
-                    id: q.id,
-                    text: q.text,
-                    category: q.category,
-                    type: 'scale' as const,
-                    options: ['전혀 아니다', '아니다', '보통이다', '그렇다', '매우 그렇다']
-                  })),
-                  link: `/survey/${surveyId}`,
-                  createdAt: new Date(),
-                  isActive: true,
-                  responses: 0,
-                };
-                
-                console.log('📝 S3 기반 설문 데이터:', s3Survey);
-                setSurvey(s3Survey);
-                setAllQuestions(s3Result.data);
-                setLoading(false);
-                return; // S3 로드 성공시 여기서 종료
-              } else {
-                console.warn('⚠️ S3 엑셀 파일 로드 실패:', s3Result.error);
-              }
-            }
-            
-          } catch (s3Error) {
-            console.error('❌ S3 엑셀 파일 로드 오류:', s3Error);
-          }
-        }
-        
-        // 2. S3 로드 실패시 백엔드 API 시도
-        console.log('📡 백엔드 API 호출 시작...');
-        
-        try {
-          const backendSurvey = await surveyAPI.getById(surveyId, true);
-          console.log('✅ 백엔드 데이터 로드 성공:', backendSurvey);
-          
-          // 백엔드 데이터를 프론트엔드 형식으로 변환
-          const defaultSurvey = getSurveyById('ai-competency-assessment');
-          console.log('🔄 기본 설문 데이터:', defaultSurvey);
-          
-          const formattedSurvey = {
-            id: backendSurvey.id,
-            title: backendSurvey.title,
-            description: backendSurvey.description || '',
-            scoreScale: backendSurvey.scale_max,
-            questions: defaultSurvey?.questions || [],
-            link: backendSurvey.access_link || `/survey/${backendSurvey.id}`,
-            createdAt: new Date(backendSurvey.created_at),
-            isActive: backendSurvey.status === 'active',
-            responses: 0,
-          };
-          
-          console.log('📝 변환된 설문 데이터:', formattedSurvey);
-          
-          setSurvey(formattedSurvey);
-          setAllQuestions((formattedSurvey.questions || []).map(q => ({
-            id: q.id,
-            text: q.text,
-            category: q.category,
-          })));
-          
-        } catch (backendError: any) {
-          console.warn('⚠️ 백엔드 로드 실패:', backendError);
-          console.log('🔄 로컬 스토어에서 시도...');
-          
-          // 3. 백엔드 실패시 로컬 스토어 시도
-          const localSurvey = getSurveyById(surveyId);
-          console.log('💾 로컬 스토어 데이터:', localSurvey);
-          
-          if (localSurvey) {
-            console.log('✅ 로컬 스토어에서 설문 찾음');
-            setSurvey(localSurvey);
-            setAllQuestions(localSurvey.questions.map(q => ({
+          const s3Survey = {
+            id: surveyId,
+            title: surveyTitle,
+            description: `${workspaceName}의 맞춤형 AI 역량 진단 설문입니다.`,
+            scoreScale: 5,
+            questions: s3Result.data.map((q: any) => ({
               id: q.id,
               text: q.text,
               category: q.category,
-            })));
-          } else {
-            console.warn('⚠️ 로컬에서도 못찾음, 기본 설문 사용');
-            
-            // 4. 최후의 수단: 기본 설문 사용
-            const defaultSurvey = getSurveyById('ai-competency-assessment');
-            console.log('🔄 기본 AI 역량 진단 설문:', defaultSurvey);
-            
-            if (defaultSurvey) {
-              const fallbackSurvey = {
-                ...defaultSurvey,
-                id: surveyId,
-                title: workspaceName ? `${workspaceName} AI 역량 진단` : 'AI 기반 직무역량 자가진단 설문',
-                description: 'AI/데이터 기본 이해부터 윤리 및 거버넌스까지 종합적인 AI 역량을 진단합니다',
-              };
-              
-              console.log('📝 Fallback 설문 데이터:', fallbackSurvey);
-              setSurvey(fallbackSurvey);
-              setAllQuestions(fallbackSurvey.questions.map(q => ({
-                id: q.id,
-                text: q.text,
-                category: q.category,
-              })));
-            } else {
-              console.error('❌ 기본 설문도 못찾음');
-              setSurvey(null);
-            }
-          }
+              type: 'scale' as const,
+              options: ['전혀 아니다', '아니다', '보통이다', '그렇다', '매우 그렇다']
+            })),
+            link: window.location.href,
+            createdAt: new Date(),
+            isActive: true,
+            responses: 0,
+          };
+          
+          console.log('📝 S3 기반 설문 데이터:', s3Survey);
+          setSurvey(s3Survey);
+          setAllQuestions(s3Result.data);
+        } else {
+          console.error('❌ S3 엑셀 파일 로드 실패:', s3Result.error);
+          console.log('🔍 시도한 S3 경로:', `forms/${workspaceName}/${surveyTitle}/${filename}`);
+          console.log('📝 실제 S3 경로 예시: forms/임시 워크스페이스/임시설문/연세대사후.xlsx');
+          setError(`S3에서 설문 파일을 찾을 수 없습니다.\n\n시도한 경로: forms/${workspaceName}/${surveyTitle}/${filename}\n\n오류: ${s3Result.error}\n\n파일이 올바른 위치에 업로드되었는지 확인해주세요.\n\n예시: forms/임시 워크스페이스/임시설문/연세대사후.xlsx`);
         }
-        
       } catch (error) {
-        console.error('❌ 설문 로드 치명적 오류:', error);
-        setSurvey(null);
+        console.error('❌ S3 엑셀 파일 로드 중 예상치 못한 오류:', error);
+        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+        setError(`설문 파일을 불러오는 중 오류가 발생했습니다: ${errorMessage}`);
       } finally {
-        console.log('🏁 로딩 완료, 상태:', {
-          survey: !!survey,
-          questionsCount: allQuestions.length,
-          loading: false
-        });
         setLoading(false);
       }
     };
@@ -346,20 +241,9 @@ const SurveyForm: React.FC = () => {
   };
 
   // 설문 중단 처리
-  const handleAbandon = async () => {
-    if (submissionId && surveyId) {
-      try {
-        const completionTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined;
-        const response = await surveySubmissionAPI.completeSubmission(surveyId, submissionId, {
-          completion_status: 'abandoned',
-          completion_time: completionTime,
-        });
-        console.log('✅ 설문 중단 처리 성공:', response);
-      } catch (error) {
-        console.error('❌ 설문 중단 처리 실패:', error);
-      }
-    }
-  };
+  const handleAbandon = useCallback(() => {
+    setShowAbandonModal(true);
+  }, []);
 
   // 페이지 이탈 시 설문 중단 처리 (handleAbandon 뒤로 이동)
   useEffect(() => {
@@ -416,24 +300,29 @@ const SurveyForm: React.FC = () => {
         }
         setCurrentStep(currentStep + 1);
       } else {
-        // 마지막 단계 - 설문 완료
-        if (!submissionId || !surveyId) {
-          throw new Error('설문 정보가 올바르지 않습니다.');
-        }
-
-        const completionTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined;
-        
-        // 설문 완료 로그 업데이트 (모든 문항을 완료했으므로 completed 상태)
-        const completeResponse = await surveySubmissionAPI.completeSubmission(surveyId, submissionId, {
-          completion_status: 'completed',  // 모든 설문을 완료했으므로 completed
-          completion_time: completionTime,
-        });
-
-        console.log('✅ 설문 완료 처리 성공:', completeResponse);
-        
-        setIsCompleted(true);
-        setShowEmailModal(true);
+      // 마지막 단계 - 설문 완료
+      if (!submissionId || !surveyId) {
+        throw new Error('설문 정보가 올바르지 않습니다.');
       }
+
+      console.log('🚨🚨🚨 설문 완료 단계 시작! 🚨🚨🚨');
+      
+      // 1. 먼저 응답 데이터를 S3에 저장
+      await handleSubmitForAnalysis();
+      
+      const completionTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined;
+      
+      // 2. 설문 완료 로그 업데이트 (모든 문항을 완료했으므로 completed 상태)
+      const completeResponse = await surveySubmissionAPI.completeSubmission(surveyId, submissionId, {
+        completion_status: 'completed',  // 모든 설문을 완료했으므로 completed
+        completion_time: completionTime,
+      });
+
+      console.log('✅ 설문 완료 처리 성공:', completeResponse);
+      
+      setIsCompleted(true);
+      setShowEmailModal(true);
+    }
     } catch (error: any) {
       console.error('❌ 다음 단계 진행 중 오류:', error);
       alert(error.message || '다음 단계로 진행하는 중 오류가 발생했습니다. 다시 시도해주세요.');
@@ -466,6 +355,37 @@ const SurveyForm: React.FC = () => {
             잠시만 기다려주세요
           </Typography>
         </Box>
+      </Box>
+    );
+  }
+
+  // 에러 상태 처리
+  if (error) {
+    return (
+      <Box sx={{ 
+        minHeight: '100vh', 
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center' 
+      }}>
+        <Container maxWidth="md">
+          <Paper sx={{ p: 6, textAlign: 'center' }}>
+            <Typography variant="h4" sx={{ fontWeight: 600, mb: 2, color: '#d32f2f' }}>
+              ❌ 설문 로드 실패
+            </Typography>
+            <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+              {error}
+            </Typography>
+            <Button 
+              variant="contained" 
+              onClick={() => window.location.reload()}
+              sx={{ mt: 2 }}
+            >
+              다시 시도
+            </Button>
+          </Paper>
+        </Container>
       </Box>
     );
   }
@@ -546,7 +466,7 @@ const SurveyForm: React.FC = () => {
       // 상태 변경 없이 값만 체크
       return (Object.keys(studentInfo) as (keyof StudentInfo)[]).every(field => !validateField(field, studentInfo[field]));
     }
-    return currentQuestions.every(q => answers[q.id] !== undefined);
+    return currentQuestions.every((q: any) => answers[q.id] !== undefined);
   };
 
   const handleBack = () => {
@@ -577,6 +497,9 @@ const SurveyForm: React.FC = () => {
 
   // 설문 제출 및 AI 분석 요청 함수
   const handleSubmitForAnalysis = async () => {
+    console.log('🚨🚨🚨 handleSubmitForAnalysis 함수 시작! 🚨🚨🚨');
+    console.log('🔍 Survey ID:', survey?.id);
+    
     if (!survey?.id) {
       throw new Error('설문 ID가 없습니다');
     }
@@ -650,16 +573,29 @@ const SurveyForm: React.FC = () => {
       aiAnalysisStatus: 'pending' as 'pending' // AI 분석 상태 추가
     };
 
-    // S3에 즉시 저장
-    console.log('📤 S3에 응답 데이터 저장 시작...');
-    const s3SaveResult = await S3Service.saveReport(s3ResponseData);
+    // 1단계: 먼저 responses 폴더에 원본 응답 저장 (AI 분석 전)
+    console.log('🚨🚨🚨 1단계: S3 responses 폴더에 원본 응답 저장 시작! 🚨🚨🚨');
+    console.log('📋 저장할 데이터:', s3ResponseData);
+    console.log('🔧 S3Service.saveRawResponse 호출 직전!');
     
-    if (!s3SaveResult.success) {
-      console.error('❌ S3 저장 실패:', s3SaveResult.error);
-      throw new Error('응답 저장에 실패했습니다.');
+    const rawResponseResult = await S3Service.saveRawResponse(s3ResponseData);
+    
+    console.log('🔧 S3Service.saveRawResponse 호출 완료!');
+    console.log('📥 결과:', rawResponseResult);
+    
+    if (!rawResponseResult.success) {
+      console.error('❌ 원본 응답 저장 실패:', rawResponseResult.error);
+      throw new Error('원본 응답 저장에 실패했습니다.');
     }
     
-    console.log('✅ S3 저장 성공:', s3SaveResult.s3Key);
+    console.log('✅ 1단계 완료: 원본 응답 저장 성공:', rawResponseResult.s3Key);
+    
+    // 2단계: AI 분석 후 reports 폴더에 분석 결과 저장 (나중에 AI 분석 완료 시)
+    // 현재는 원본 응답만 저장하고, AI 분석은 별도 프로세스에서 처리
+    console.log('📋 2단계: AI 분석은 별도 프로세스에서 처리됩니다.');
+    
+    // 호환성을 위해 rawResponseResult를 s3SaveResult로 설정
+    const s3SaveResult = rawResponseResult;
 
     // 새로운 백엔드 API로 응답 전송
     try {
@@ -1342,7 +1278,7 @@ const SurveyForm: React.FC = () => {
                 </Typography>
               </Box>
               
-              {currentQuestions.map((question, index) => (
+              {currentQuestions.map((question: any, index: number) => (
                 <Box key={question.id} sx={{ 
                   mb: { xs: 3, md: 4 },
                   p: { xs: 2, md: 3 },

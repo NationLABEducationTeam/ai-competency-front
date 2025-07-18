@@ -122,11 +122,12 @@ class S3Service {
     file: File, 
     surveyId: string,
     workspaceName: string,
+    surveyTitle: string, // 설문 제목 추가
     onProgress?: (progress: number) => void
   ): Promise<S3UploadResult> {
     // 일단 모든 환경에서 직접 업로드 방식 사용
     console.log('🚀 S3 직접 업로드 방식 사용');
-    return this.uploadDirectly(file, surveyId, workspaceName, onProgress);
+    return this.uploadDirectly(file, surveyId, workspaceName, surveyTitle, onProgress);
   }
 
   /**
@@ -161,6 +162,7 @@ class S3Service {
     file: File, 
     surveyId: string,
     workspaceName: string,
+    surveyTitle: string, // 설문 제목 추가
     onProgress?: (progress: number) => void
   ): Promise<S3UploadResult> {
     try {
@@ -172,8 +174,9 @@ class S3Service {
       });
       console.log('워크스페이스:', workspaceName);
 
-      // forms/{workspaceName}/{originalFilename} 구조로 단순화
-      const s3Key = `forms/${workspaceName}/${file.name}`;
+      // S3 키 생성: 워크스페이스별/설문 제목별로 폴더를 구분하여 파일 관리
+      // 예: workspaces/MyWorkspace/MyFirstSurvey/survey_questions.xlsx
+      const s3Key = `forms/${workspaceName}/${surveyTitle}/${file.name}`;
       
       console.log('S3 키:', s3Key);
 
@@ -240,19 +243,89 @@ class S3Service {
   }
 
   /**
+   * S3 폴더에서 실제 파일명을 찾습니다
+   */
+  static async findActualFileInFolder(
+    workspaceName: string,
+    surveyTitle: string
+  ): Promise<string | null> {
+    try {
+      const folderPrefix = `forms/${workspaceName}/${surveyTitle}/`;
+      console.log('🔍 S3 폴더에서 파일 검색:', folderPrefix);
+      
+      const command = new ListObjectsV2Command({
+        Bucket: AWS_CONFIG.bucketName,
+        Prefix: folderPrefix,
+        MaxKeys: 10 // 폴더당 최대 10개 파일만 조회
+      });
+      
+      const response = await s3Client.send(command);
+      
+      if (!response.Contents || response.Contents.length === 0) {
+        console.log('❌ 폴더에 파일이 없습니다');
+        return null;
+      }
+      
+      // 엑셀 파일만 필터링 (.xlsx, .xls)
+      const excelFiles = response.Contents.filter(obj => {
+        const key = obj.Key || '';
+        return key.toLowerCase().endsWith('.xlsx') || key.toLowerCase().endsWith('.xls');
+      });
+      
+      if (excelFiles.length === 0) {
+        console.log('❌ 엑셀 파일이 없습니다');
+        return null;
+      }
+      
+      // 첫 번째 엑셀 파일의 파일명 추출
+      const firstFile = excelFiles[0];
+      const fullKey = firstFile.Key || '';
+      const fileName = fullKey.split('/').pop() || '';
+      
+      console.log('✅ 실제 파일명 발견:', fileName);
+      console.log('📁 전체 S3 키:', fullKey);
+      
+      return fileName;
+      
+    } catch (error) {
+      console.error('❌ S3 폴더 검색 오류:', error);
+      return null;
+    }
+  }
+
+  /**
    * S3에서 엑셀 파일을 다운로드하고 파싱합니다
    */
   static async downloadAndParseExcel(
     workspaceName: string,
-    filename: string
+    filename: string,
+    surveyTitle: string
   ): Promise<S3DownloadResult> {
     try {
-      console.log('📥 S3에서 엑셀 파일 다운로드 시작:', { workspaceName, filename });
+      console.log('📥 S3에서 엑셀 파일 다운로드 시작:', { workspaceName, filename, surveyTitle });
       
-      const s3Key = `forms/${workspaceName}/${filename}`;
+      // 실제 파일명 찾기 (filename이 정확하지 않을 수 있으므로)
+      let actualFileName = filename;
+      
+      // filename이 기본값이거나 존재하지 않는 경우 실제 파일 검색
+      if (!filename || filename === 'survey.xlsx') {
+        console.log('🔍 기본 파일명이므로 실제 파일 검색 시작...');
+        const foundFileName = await this.findActualFileInFolder(workspaceName, surveyTitle);
+        if (foundFileName) {
+          actualFileName = foundFileName;
+          console.log('✅ 실제 파일명 사용:', actualFileName);
+        } else {
+          console.log('❌ 실제 파일을 찾을 수 없습니다');
+        }
+      }
+      
+      // S3 키 생성
+      const s3Key = `forms/${workspaceName}/${surveyTitle}/${actualFileName}`;
+      
       // S3 직접 URL 사용
       const fileUrl = `https://${AWS_CONFIG.bucketName}.s3.${AWS_CONFIG.region}.amazonaws.com/${s3Key}`;
       
+      console.log('📁 시도할 S3 키:', s3Key);
       console.log('📁 다운로드 URL:', fileUrl);
       
       // S3에서 파일 다운로드
@@ -302,7 +375,93 @@ class S3Service {
   }
 
   /**
-   * 설문 리포트를 S3에 저장합니다 (reports 폴더)
+   * 원본 설문 응답을 S3에 저장합니다 (responses 폴더) - AI 분석 전에 먼저 저장
+   */
+  static async saveRawResponse(responseData: SurveyResponse): Promise<S3UploadResult> {
+    try {
+      console.log('💾 S3에 원본 설문 응답 저장 시작 (AI 분석 전):', responseData);
+      
+      // 파일명 생성: responses/{workspaceName}/{surveyFolderName}/{timestamp}_{studentName}.json
+      const studentName = responseData.studentInfo.name.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `${timestamp}_${studentName}.json`;
+      const s3Key = `responses/${responseData.workspaceName}/${responseData.surveyFolderName}/${filename}`;
+      
+      console.log('📁 원본 응답 저장 경로:', s3Key);
+      
+      // JSON 데이터 생성 (원본 응답만, AI 분석 결과 없음)
+      const rawResponseData = {
+        ...responseData,
+        savedAt: new Date().toISOString(),
+        dataType: 'raw_response', // AI 분석 전 원본 응답임을 표시
+      };
+      
+      const jsonData = JSON.stringify(rawResponseData, null, 2);
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      
+      // PutObject 명령 생성
+      const command = new PutObjectCommand({
+        Bucket: AWS_CONFIG.bucketName,
+        Key: s3Key,
+        ContentType: 'application/json',
+        Metadata: {
+          'survey-id': responseData.surveyId,
+          'workspace-name': responseData.workspaceName,
+          'student-name': responseData.studentInfo.name,
+          'student-email': responseData.studentInfo.email,
+          'submitted-at': responseData.submittedAt,
+          'content-type': 'raw-response', // 원본 응답임을 표시
+          'data-type': 'pre-ai-analysis',
+        },
+      });
+
+      // Presigned URL 생성 (15분 유효)
+      const presignedUrl = await getSignedUrl(s3Client, command, { 
+        expiresIn: 900 // 15분
+      });
+
+      console.log('Presigned URL 생성 완료');
+
+      // 파일 업로드
+      const uploadResponse = await fetch(presignedUrl, {
+        method: 'PUT',
+        body: blob,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('S3 원본 응답 저장 실패:', uploadResponse.status, errorText);
+        throw new Error(`S3 원본 응답 저장 실패: ${uploadResponse.status} ${uploadResponse.statusText}`);
+      }
+
+      console.log('✅ S3 원본 응답 저장 성공!');
+      console.log('📁 저장 경로:', `s3://${AWS_CONFIG.bucketName}/${s3Key}`);
+
+      // S3 직접 URL 사용
+      const fileUrl = `https://${AWS_CONFIG.bucketName}.s3.${AWS_CONFIG.region}.amazonaws.com/${s3Key}`;
+
+      return {
+        success: true,
+        s3Key,
+        url: fileUrl,
+      };
+
+    } catch (error) {
+      console.error('❌ S3 원본 응답 저장 오류:', error);
+      return {
+        success: false,
+        s3Key: '',
+        url: '',
+        error: error instanceof Error ? error.message : '알 수 없는 오류',
+      };
+    }
+  }
+
+  /**
+   * 설문 리포트를 S3에 저장합니다 (reports 폴더) - AI 분석 후 저장
    */
   static async saveReport(responseData: SurveyResponse): Promise<S3UploadResult> {
     try {
@@ -1025,15 +1184,8 @@ class S3Service {
     } catch (error) {
       console.error('❌ S3 파일 목록 조회 실패:', error);
       
-      // 실패 시 기본 파일명 반환
-      const commonFilenames = [
-        'survey.xlsx',
-        'questions.xlsx',
-        'AI역량진단_문항템플릿.xlsx',
-        `${workspaceName}_survey.xlsx`,
-      ];
-      
-      return commonFilenames;
+      // ✅ 실패 시 빈 배열 반환 (더 이상 기본 파일명 반환하지 않음)
+      return [];
     }
   }
 

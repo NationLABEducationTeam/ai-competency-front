@@ -42,7 +42,7 @@ import {
   Stop,
   Refresh,
   Archive,
-  Unarchive,
+
 } from '@mui/icons-material';
 import SurveyCreator from '../components/SurveyCreator';
 import SurveySubmissionLogs from '../components/SurveySubmissionLogs';
@@ -72,7 +72,7 @@ const WorkspaceDetail: React.FC = () => {
   const [editingSurvey, setEditingSurvey] = useState<SurveyData | null>(null);
   const [deletingSurvey, setDeletingSurvey] = useState<SurveyData | null>(null);
   const [openDeleteErrorDialog, setOpenDeleteErrorDialog] = useState(false);
-  const [deleteErrorMessage, setDeleteErrorMessage] = useState('');
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string>(''); 
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
@@ -169,7 +169,7 @@ const WorkspaceDetail: React.FC = () => {
               questionsCount: questionsCount,
               responses: responsesCount,
           isActive: survey.status === 'active',
-          link: `/survey/${survey.id}?workspace=${encodeURIComponent(workspaceData.title)}&file=survey.xlsx`,
+          link: `/survey/${survey.id}?workspace=${encodeURIComponent(workspaceData.title)}`,
           createdAt: new Date(survey.created_at),
               status: survey.status,
             };
@@ -330,32 +330,50 @@ const WorkspaceDetail: React.FC = () => {
     );
   }
 
-  const handleCreateSurvey = async (surveyData: any): Promise<{ id: string; status: string }> => {
+  const handleCreateSurvey = async (surveyData: any): Promise<{ id:string; status: string; surveyLink: string }> => {
     try {
       setSubmitting(true);
       
-      // 설문 기본 정보 생성
-      const createData: SurveyCreate = {
-        workspace_id: workspaceId!,
-        title: surveyData.title,
-        description: surveyData.description,
-        scale_min: 1,
-        scale_max: surveyData.scoreScale || 5,
-        max_questions: surveyData.maxQuestions || 100,
-        questions: surveyData.questions.map((q: any) => ({
-          text: q.text,
-          category: q.category,
-          order: q.order
-        }))
-      };
+    // 설문 기본 정보 생성 (파일명은 S3에서 동적으로 찾음)
+    const createData: SurveyCreate = {
+      workspace_id: workspaceId!,
+      title: surveyData.title,
+      description: surveyData.description,
+      scale_min: 1,
+      scale_max: surveyData.scoreScale || 5,
+      max_questions: surveyData.maxQuestions || 100,
+      questions: surveyData.questions.map((q: any) => ({
+        text: q.text,
+        category: q.category,
+        order: q.order
+      }))
+    };
       
       console.log('설문 생성 데이터:', createData);
       console.log('문항 수:', createData.questions?.length);
       
       const newSurvey = await surveyAPI.create(createData);
+
+    // 파일 업로드 로직 추가
+    if (surveyData.file) {
+      const uploadResult = await S3Service.uploadFile(
+        surveyData.file,
+        newSurvey.id,
+        workspace.title,
+        surveyData.title // 설문 제목 전달
+      );
+
+      if (!uploadResult.success) {
+        // 업로드 실패 시 생성된 설문을 롤백하거나 사용자에게 알림
+        console.error('S3 파일 업로드 실패:', uploadResult.error);
+        showSnackbar('파일 업로드에 실패했습니다. 설문은 생성되었지만 활성화되지 않을 수 있습니다.', 'error');
+        // 여기서 추가적인 롤백 로직을 구현할 수 있습니다. 예: surveyAPI.delete(newSurvey.id)
+      }
+    }
       
-      // 업로드된 파일명 사용 (없으면 기본값)
-      const fileName = surveyData.uploadedFileName || 'survey.xlsx';
+      // 기본 파일명 사용 (S3에서 동적으로 실제 파일 찾음)
+      const fileName = 'survey.xlsx'; // 기본값, S3Service에서 실제 파일 검색
+      console.log('📝 기본 파일명 사용 (S3에서 동적 검색):', fileName);
       
       // S3 URL로 접근시에만 정적 웹사이트 URL 사용
       const baseUrl = window.location.hostname.includes('s3') 
@@ -363,7 +381,7 @@ const WorkspaceDetail: React.FC = () => {
         : window.location.origin;
 
       // 설문 링크 생성
-      const surveyLink = `${baseUrl}/survey/${newSurvey.id}?workspace=${encodeURIComponent(workspace.title)}&file=${encodeURIComponent(fileName)}`;
+      const surveyLink = `${baseUrl}/survey/${newSurvey.id}?workspace=${encodeURIComponent(workspace.title)}&file=${encodeURIComponent(fileName)}&surveyTitle=${encodeURIComponent(newSurvey.title)}`;
       
       // surveyStore에도 설문 추가 (SurveyForm에서 찾을 수 있도록)
       const surveyForStore = {
@@ -376,25 +394,13 @@ const WorkspaceDetail: React.FC = () => {
         createdAt: new Date(newSurvey.created_at),
         isActive: newSurvey.status === 'active',
         responses: 0,
+        status: newSurvey.status,
+      questionsCount: surveyData.questions.length,
       };
       
       addSurvey(surveyForStore);
       
-      // 로컬 상태 업데이트
-      const formattedSurvey: SurveyData = {
-        id: newSurvey.id,
-        title: newSurvey.title,
-        description: newSurvey.description || '',
-        scoreScale: newSurvey.scale_max,
-        questionsCount: surveyData.questions?.length || 0,
-        responses: 0, // 새로 생성된 설문이므로 응답 수는 0
-        isActive: newSurvey.status === 'active',
-        link: surveyLink,
-        createdAt: new Date(newSurvey.created_at),
-        status: newSurvey.status,
-      };
-      
-      setWorkspaceSurveys(prev => [...prev, formattedSurvey]);
+      setWorkspaceSurveys(prev => [...prev, surveyForStore]);
       
       // 생성 후 데이터 새로고침 (최신 상태 반영)
       setTimeout(() => {
@@ -403,7 +409,8 @@ const WorkspaceDetail: React.FC = () => {
       
       return {
         id: newSurvey.id,
-        status: newSurvey.status
+        status: newSurvey.status,
+        surveyLink: surveyLink
       };
     } catch (error) {
       console.error('설문 생성 중 오류:', error);
@@ -655,62 +662,21 @@ const WorkspaceDetail: React.FC = () => {
       // 해당 워크스페이스의 설문 목록 가져오기
       const surveysData = await surveyAPI.getByWorkspace(workspaceId);
       
-      // S3에서 워크스페이스의 모든 응답 데이터 가져오기
-      const workspaceResponses = await S3Service.listWorkspaceReports(workspaceData.title);
-      console.log('📊 워크스페이스 상세 - 전체 응답 수:', workspaceResponses.length);
-      
       // 백엔드 데이터를 프론트엔드 형식으로 변환
-      const formattedSurveys: SurveyData[] = await Promise.all(
-        surveysData
-          .filter(survey => survey.status !== 'draft' && survey.status !== 'inactive') // 보관된 설문과 휴지통 설문 제외
-          .map(async (survey) => {
-          // 1. 문항 수 계산 - surveyStore에서 가져오기
-          let questionsCount = 0;
-          const surveyFromStore = getSurveyById(survey.id);
-          if (surveyFromStore && surveyFromStore.questions) {
-            questionsCount = surveyFromStore.questions.length;
-            console.log(`📋 설문 "${survey.title}" 문항 수 (Store):`, questionsCount);
-          } else {
-            // Store에 없으면 백엔드 questions 필드 확인
-            if (survey.questions && Array.isArray(survey.questions)) {
-              questionsCount = survey.questions.length;
-              console.log(`📋 설문 "${survey.title}" 문항 수 (Backend):`, questionsCount);
-            } else {
-              // 기본 AI 역량 진단 설문인 경우
-              if (survey.title.includes('AI') || survey.id === 'ai-competency-assessment') {
-                const defaultSurvey = getSurveyById('ai-competency-assessment');
-                questionsCount = defaultSurvey?.questions?.length || 33; // 기본 AI 설문 문항 수
-                console.log(`📋 설문 "${survey.title}" 기본 AI 설문 문항 수:`, questionsCount);
-              }
-            }
-          }
-          
-          // 2. 응답 수 계산 - S3 데이터에서 해당 설문의 응답 수 계산
-          const surveyResponses = workspaceResponses.filter((response: SurveyResponse) => {
-            // 설문 ID 매칭 또는 설문 제목 매칭
-            return response.surveyId === survey.id || 
-                   response.workspaceName === workspaceData.title ||
-                   response.surveyFolderName === survey.title.replace(/[^a-zA-Z0-9가-힣\s]/g, '').replace(/\s+/g, '_');
-          });
-          
-          const responsesCount = surveyResponses.length;
-          
-          return {
-            id: survey.id,
-            title: survey.title,
-            description: survey.description || '',
-            scoreScale: survey.scale_max,
-            questionsCount: questionsCount,
-            responses: responsesCount,
-            isActive: survey.status === 'active',
-            link: `/survey/${survey.id}?workspace=${encodeURIComponent(workspaceData.title)}&file=survey.xlsx`,
-            createdAt: new Date(survey.created_at),
-            status: survey.status,
-          };
-        })
-      );
+      const formattedSurveys: SurveyData[] = surveysData.map(survey => ({
+          ...survey,
+          description: survey.description || '',
+          questionsCount: survey.questions ? survey.questions.length : 0,
+          responses: 0,
+          scoreScale: survey.scale_max || 5,
+          link: survey.access_link || '',
+          fileName: (survey as any).file_name || '',
+          createdAt: new Date(survey.created_at),
+          isActive: survey.status === 'active',
+        }));
       
       setWorkspaceSurveys(formattedSurveys);
+      
       showSnackbar('데이터가 새로고침되었습니다.', 'success');
       
     } catch (error) {
@@ -971,26 +937,36 @@ const WorkspaceDetail: React.FC = () => {
                     {/* 설문 접속 버튼들 */}
                     <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
                       {survey.isActive ? (
-                        <Button
-                          variant="contained"
-                          size="small"
+                        <Link
+                          component="button"
+                          variant="body2"
                           onClick={() => {
-                            const fullUrl = survey.link.startsWith('http') ? survey.link : `${window.location.origin}${survey.link}`;
-                            window.open(fullUrl, '_blank');
+                            // 디버깅: 설문 데이터 확인
+                            console.log('🔍 설문 데이터:', survey);
+                            // 기본 파일명 사용 (S3Service에서 동적으로 실제 파일 찾음)
+                            const fileName = 'survey.xlsx'; // S3Service.findActualFileInFolder에서 실제 파일 검색
+                            console.log('📝 기본 파일명 사용 (S3에서 동적 검색):', fileName);
+                            const surveyLink = `${window.location.origin}/survey/${survey.id}?workspace=${encodeURIComponent(workspace?.title || '')}&file=${encodeURIComponent(fileName)}&surveyTitle=${encodeURIComponent(survey.title)}`;
+                            
+                            console.log('🔗 생성된 설문 링크:', surveyLink);
+                            console.log('🔍 링크 파라미터:');
+                            console.log('- workspace:', workspace?.title);
+                            console.log('- file:', fileName);
+                            console.log('- surveyTitle:', survey.title);
+                            console.log('- 예상 S3 경로:', `forms/${workspace?.title}/${survey.title}/${fileName}`);
+                            
+                            window.open(surveyLink, '_blank');
                           }}
-                          sx={{
-                            background: 'linear-gradient(135deg, #48bb78 0%, #38a169 100%)',
-                            textTransform: 'none',
-                            fontSize: '12px',
-                            px: 2,
-                            py: 0.5,
-                            '&:hover': {
-                              background: 'linear-gradient(135deg, #38a169 0%, #2f855a 100%)',
-                            },
+                          sx={{ 
+                            wordBreak: 'break-all',
+                            textAlign: 'left',
+                            display: 'inline-block',
+                            verticalAlign: 'middle',
+                            ml: 0.5
                           }}
                         >
-                          🚀 설문 시작하기
-                        </Button>
+                          설문 링크 열기
+                        </Link>
                       ) : (
                         <Button
                           variant="contained"
