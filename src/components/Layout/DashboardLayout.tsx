@@ -27,6 +27,7 @@ import {
   SearchOutlined,
   HomeOutlined,
   DeleteOutlined,
+  FileDownloadOutlined,
 } from '@mui/icons-material';
 import { useAuthStore } from '../../store/authStore';
 import { authAPI } from '../../services/apiService';
@@ -58,6 +59,7 @@ const DashboardLayout: React.FC = () => {
     { text: '대시보드', icon: <HomeOutlined />, path: '/dashboard' },
     { text: '워크스페이스', icon: <FolderOutlined />, path: '/workspaces' },
     { text: '리포트', icon: <InsertChartOutlined />, path: '/reports' },
+    { text: '결과 export', icon: <FileDownloadOutlined />, path: '/export' },
     { text: '휴지통/보관함', icon: <DeleteOutlined />, path: '/trash' },
   ];
 

@@ -18,6 +18,7 @@ import ThankYou from './pages/ThankYou';
 import Settings from './pages/Settings';
 import Trash from './pages/Trash';
 import Reports from './pages/Reports';
+import ExportResults from './pages/ExportResults';
 
 const PrivateRoute: React.FC = () => {
   const { isAuthenticated } = useAuthStore();
@@ -52,6 +53,7 @@ function App() {
             <Route path="reports/:workspaceId" element={<Reports />} />
             <Route path="reports/:workspaceId/:surveyId" element={<Reports />} />
             {/* <Route path="reports/detail/:reportId" element={<ReportDetail />} /> */}
+            <Route path="export" element={<ExportResults />} />
             <Route path="trash" element={<Trash />} />
             <Route path="settings" element={<Settings />} />
             <Route index element={<Navigate to="/dashboard" replace />} />
