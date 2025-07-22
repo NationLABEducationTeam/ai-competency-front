@@ -24,7 +24,6 @@ import {
 import { CheckCircle } from '@mui/icons-material';
 import { surveyAPI, surveySubmissionAPI } from '../services/apiService';
 import { AIAnalysisService } from '../services/aiAnalysisService';
-import { SQSService } from '../services/sqsService';
 import S3Service from '../services/s3Service';
 import { useSurveyStore } from '../store/surveyStore';
 import { useWorkspaceStore } from '../store/workspaceStore';
@@ -533,14 +532,22 @@ const SurveyForm: React.FC = () => {
       }
     }
     
-    // 설문 폴더명을 워크스페이스와 동일하게 설정 (URL 파라미터가 없을 때)
-    let surveyFolderName = searchParams.get('survey');
+    // 설문 폴더명을 올바른 surveyTitle에서 가져오기
+    let surveyFolderName: string = searchParams.get('survey') || searchParams.get('surveyTitle') || '';
     
     // URL 파라미터에 없으면 설문 데이터나 기타 소스에서 시도
     if (!surveyFolderName) {
-      // 워크스페이스 이름과 동일하게 설정 (예: "숙명여대" → "숙명여대_AI역량진단")
-      surveyFolderName = `${workspaceName}_AI역량진단`;
-      console.log('📁 설문 폴더명을 워크스페이스 기반으로 생성:', surveyFolderName);
+      // survey 객체에서 title 사용 (loadSurveyData에서 설정됨)
+      if (survey?.title) {
+        surveyFolderName = survey.title;
+        console.log('📁 설문 객체에서 설문 폴더명 가져옴:', surveyFolderName);
+      } else {
+        // 최후의 수단으로만 워크스페이스 기반 생성 (예: "숙명여대" → "숙명여대_AI역량진단")
+        surveyFolderName = `${workspaceName}_AI역량진단`;
+        console.log('📁 설문 폴더명을 워크스페이스 기반으로 생성 (최후 수단):', surveyFolderName);
+      }
+    } else {
+      console.log('📁 URL 파라미터에서 설문 폴더명 가져옴:', surveyFolderName);
     }
     
     console.log('📂 S3 저장 경로:', {
@@ -783,7 +790,7 @@ const SurveyForm: React.FC = () => {
                   
                   // 워크스페이스 정보를 더 안정적으로 가져오기
                   let workspaceName = searchParams.get('workspace');
-                  let surveyFolderName = searchParams.get('survey');
+                  let surveyFolderName: string = searchParams.get('survey') || '';
                   
                   console.log('🔍 URL 파라미터 확인:', {
                     workspace: searchParams.get('workspace'),
@@ -817,11 +824,27 @@ const SurveyForm: React.FC = () => {
                     }
                   }
                   
-                  // 설문 폴더명을 워크스페이스와 동일하게 설정 (URL 파라미터가 없을 때)
+                  // 설문 폴더명을 올바른 surveyTitle에서 가져오기
                   if (!surveyFolderName) {
-                    // 워크스페이스 이름과 동일하게 설정 (예: "숙명여대" → "숙명여대_AI역량진단")
+                    // 먼저 surveyTitle URL 파라미터에서 시도
+                    const surveyTitle = searchParams.get('surveyTitle');
+                    if (surveyTitle) {
+                      surveyFolderName = surveyTitle;
+                      console.log('📁 URL 파라미터에서 설문 폴더명 가져옴:', surveyFolderName);
+                    } else if (survey?.title) {
+                      // survey 객체에서 title 사용 (loadSurveyData에서 설정됨)
+                      surveyFolderName = survey.title;
+                      console.log('📁 설문 객체에서 설문 폴더명 가져옴:', surveyFolderName);
+                    } else {
+                      // 최후의 수단으로만 워크스페이스 기반 생성 (예: "숙명여대" → "숙명여대_AI역량진단")
+                      surveyFolderName = `${workspaceName}_AI역량진단`;
+                      console.log('📁 설문 폴더명을 워크스페이스 기반으로 생성 (최후 수단):', surveyFolderName);
+                    }
+                  }
+                  
+                  // surveyFolderName이 null이 아님을 보장
+                  if (!surveyFolderName) {
                     surveyFolderName = `${workspaceName}_AI역량진단`;
-                    console.log('📁 설문 폴더명을 워크스페이스 기반으로 생성:', surveyFolderName);
                   }
                   
                   console.log('📂 S3 저장 경로:', {
@@ -861,42 +884,6 @@ const SurveyForm: React.FC = () => {
                       answersWithText[question.text] = score;
                     }
                   });
-                  
-                  // SQS를 통한 비동기 AI 분석 요청
-                  console.log('📤 SQS로 AI 분석 요청 전송 중...');
-                  
-                  // 임시 테스트: 실제 SQS에 메시지 전송 시도
-                  console.log('🧪 실제 SQS 전송 테스트 시작...');
-                  
-                  // 1. Mock 테스트 (현재)
-                  const mockResult = await SQSService.sendMockRequest({
-                    studentInfo: {
-                      name: studentInfo.name.trim(),
-                      organization: studentInfo.organization.trim(),
-                      age: parseInt(studentInfo.age, 10),
-                      email: studentInfo.email.trim(),
-                      education: studentInfo.education.trim(),
-                      major: studentInfo.major.trim(),
-                    },
-                    answers: answersWithText,
-                    categoryScores: categoryScores,
-                    overallScore: overallScore,
-                    workspaceName: workspaceName,
-                    surveyFolderName: surveyFolderName,
-                    surveyId: survey?.id,
-                    submittedAt: new Date().toISOString(),
-                    s3Key: s3Key
-                  });
-                  
-                  console.log('✅ Mock 결과:', mockResult);
-                  
-                  // Mock 결과를 기준으로 처리
-                  if (mockResult.success) {
-                    console.log('✅ SQS 메시지 전송 성공:', mockResult.messageId);
-                    console.log('🎯 AI 분석이 백그라운드에서 처리됩니다');
-                  } else {
-                    console.error('❌ SQS 메시지 전송 실패:', mockResult.error);
-                  }
                   
                   // Lambda 직접 호출로 AI 분석 시작
                   console.log('🤖 Lambda 직접 호출로 AI 분석 시작...');

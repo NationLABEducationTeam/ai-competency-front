@@ -24,18 +24,25 @@ def lambda_handler(event, context):
     """
     try:
         # 요청 파라미터 파싱
-        workspace_name = event.get('workspace_name')
-        survey_name = event.get('survey_name')
+        logger.info(f"Received event: {json.dumps(event)}")
+        
+        # HTTP 요청의 body에서 파라미터 추출
+        if 'body' in event:
+            if isinstance(event['body'], str):
+                body = json.loads(event['body'])
+            else:
+                body = event['body']
+        else:
+            body = event
+        
+        workspace_name = body.get('workspace_name')
+        survey_name = body.get('survey_name')
+        
+        logger.info(f"Parsed parameters: workspace_name={workspace_name}, survey_name={survey_name}")
         
         if not workspace_name or not survey_name:
             return {
                 'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type'
-                },
                 'body': json.dumps({
                     'error': 'workspace_name and survey_name are required',
                     'message': '워크스페이스명과 설문명이 필요합니다.'
@@ -49,12 +56,6 @@ def lambda_handler(event, context):
         if not survey_responses:
             return {
                 'statusCode': 404,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type'
-                },
                 'body': json.dumps({
                     'error': 'No responses found',
                     'message': '응답 데이터가 없습니다.'
@@ -162,20 +163,8 @@ def create_excel_file(workspace_name: str, survey_name: str, responses: List[Dic
         # 1. 개요 시트
         create_summary_sheet_openpyxl(wb, workspace_name, survey_name, responses)
         
-        # 2. 응답자 정보 시트
-        create_respondents_sheet_openpyxl(wb, responses)
-        
-        # 3. 설문 응답 시트
-        create_responses_sheet_openpyxl(wb, responses)
-        
-        # 4. AI 분석 결과 시트
-        create_ai_analysis_sheet_openpyxl(wb, responses)
-        
-        # 5. 카테고리별 점수 시트
+        # 2. 카테고리별 점수 시트 (메인 시트)
         create_category_scores_sheet_openpyxl(wb, responses)
-        
-        # 6. 통계 분석 시트
-        create_statistics_sheet_openpyxl(wb, responses)
         
         # 파일 저장
         wb.save(file_path)
@@ -309,129 +298,88 @@ def create_responses_sheet_openpyxl(wb: Workbook, responses: List[Dict[str, Any]
         else:  # 질문 열
             ws.column_dimensions[get_column_letter(col_idx)].width = 30
 
-def create_ai_analysis_sheet(writer, responses: List[Dict[str, Any]]):
-    """AI 분석 결과 시트 생성"""
-    analysis_data = []
+def create_category_scores_sheet_openpyxl(wb: Workbook, responses: List[Dict[str, Any]]):
+    """카테고리별 점수 시트 생성 (openpyxl 사용) - 메인 시트"""
+    ws = wb.create_sheet(title='카테고리별 점수')
     
-    for response in responses:
-        student_info = response.get('studentInfo', {})
-        ai_analysis = response.get('aiAnalysis', {})
-        
-        if not ai_analysis:
-            continue
-            
-        analysis_data.append({
-            '이름': student_info.get('name', ''),
-            '소속': student_info.get('organization', ''),
-            '전체 점수': ai_analysis.get('overallScore', ''),
-            '학습자 유형': ai_analysis.get('summary', '').split("'")[1] if "'" in ai_analysis.get('summary', '') else '',
-            '현재 레벨': ai_analysis.get('summary', '').split('Level ')[1].split(' -')[0] if 'Level ' in ai_analysis.get('summary', '') else '',
-            '강점 1': ai_analysis.get('strengths', [''])[0] if ai_analysis.get('strengths') else '',
-            '강점 2': ai_analysis.get('strengths', ['', ''])[1] if len(ai_analysis.get('strengths', [])) > 1 else '',
-            '강점 3': ai_analysis.get('strengths', ['', '', ''])[2] if len(ai_analysis.get('strengths', [])) > 2 else '',
-            '약점 1': ai_analysis.get('weaknesses', [''])[0] if ai_analysis.get('weaknesses') else '',
-            '약점 2': ai_analysis.get('weaknesses', ['', ''])[1] if len(ai_analysis.get('weaknesses', [])) > 1 else '',
-            '추천사항 1': ai_analysis.get('recommendations', [''])[0] if ai_analysis.get('recommendations') else '',
-            '추천사항 2': ai_analysis.get('recommendations', ['', ''])[1] if len(ai_analysis.get('recommendations', [])) > 1 else '',
-            '추천사항 3': ai_analysis.get('recommendations', ['', '', ''])[2] if len(ai_analysis.get('recommendations', [])) > 2 else '',
-            '종합 분석': ai_analysis.get('summary', ''),
-            '분석 완료일시': ai_analysis.get('analyzedAt', ''),
-        })
+    if not responses:
+        return
     
-    df_analysis = pd.DataFrame(analysis_data)
-    df_analysis.to_excel(writer, sheet_name='AI 분석 결과', index=False)
-
-def create_category_scores_sheet(writer, responses: List[Dict[str, Any]]):
-    """카테고리별 점수 시트 생성"""
-    category_data = []
+    # 헤더 스타일
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font.color = "FFFFFF"
     
-    for response in responses:
+    # 기본 헤더
+    base_headers = ['이름', '소속', '전공', '전체 점수']
+    
+    # 첫 번째 응답에서 카테고리 정보 추출
+    categories = []
+    if responses:
+        first_response = responses[0]
+        ai_analysis = first_response.get('aiAnalysis', {})
+        category_scores = ai_analysis.get('categoryScores', [])
+        categories = [cat.get('category', '') for cat in category_scores]
+    
+    # 카테고리별 헤더 생성 (점수, 백분율, 레벨)
+    category_headers = []
+    for category in categories:
+        category_headers.extend([
+            f'{category}_점수',
+            f'{category}_백분율',
+            f'{category}_레벨'
+        ])
+    
+    all_headers = base_headers + category_headers
+    
+    # 헤더 작성
+    for col_idx, header in enumerate(all_headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    # 데이터 작성
+    for row_idx, response in enumerate(responses, start=2):
         student_info = response.get('studentInfo', {})
         ai_analysis = response.get('aiAnalysis', {})
         category_scores = ai_analysis.get('categoryScores', [])
         
-        if not category_scores:
-            continue
+        # 기본 정보
+        ws.cell(row=row_idx, column=1, value=student_info.get('name', ''))
+        ws.cell(row=row_idx, column=2, value=student_info.get('organization', ''))
+        ws.cell(row=row_idx, column=3, value=student_info.get('major', ''))
+        ws.cell(row=row_idx, column=4, value=ai_analysis.get('overallScore', ''))
+        
+        # 카테고리별 점수
+        col_idx = 5
+        for category in categories:
+            # 해당 카테고리 찾기
+            category_data = next((cat for cat in category_scores if cat.get('category') == category), {})
             
-        base_row = {
-            '이름': student_info.get('name', ''),
-            '소속': student_info.get('organization', ''),
-            '전체 점수': ai_analysis.get('overallScore', ''),
-        }
-        
-        # 카테고리별 점수 추가
-        for category in category_scores:
-            category_name = category.get('category', '')
-            base_row[f'{category_name}_점수'] = category.get('score', '')
-            base_row[f'{category_name}_백분율'] = f"{category.get('percentage', '')}%"
-            base_row[f'{category_name}_레벨'] = category.get('level', '')
-        
-        category_data.append(base_row)
+            # 점수, 백분율, 레벨 입력
+            ws.cell(row=row_idx, column=col_idx, value=category_data.get('score', ''))
+            ws.cell(row=row_idx, column=col_idx + 1, value=f"{category_data.get('percentage', '')}%" if category_data.get('percentage') else '')
+            ws.cell(row=row_idx, column=col_idx + 2, value=category_data.get('level', ''))
+            
+            col_idx += 3
     
-    df_category = pd.DataFrame(category_data)
-    df_category.to_excel(writer, sheet_name='카테고리별 점수', index=False)
-
-def create_statistics_sheet(writer, responses: List[Dict[str, Any]]):
-    """통계 분석 시트 생성"""
-    stats_data = []
+    # 열 너비 조정
+    ws.column_dimensions['A'].width = 12  # 이름
+    ws.column_dimensions['B'].width = 25  # 소속
+    ws.column_dimensions['C'].width = 15  # 전공
+    ws.column_dimensions['D'].width = 12  # 전체 점수
     
-    # 소속별 통계
-    organizations = {}
-    for response in responses:
-        org = response.get('studentInfo', {}).get('organization', '미입력')
-        organizations[org] = organizations.get(org, 0) + 1
+    # 카테고리별 열 너비 조정
+    col_idx = 5
+    for category in categories:
+        ws.column_dimensions[get_column_letter(col_idx)].width = 12      # 점수
+        ws.column_dimensions[get_column_letter(col_idx + 1)].width = 12  # 백분율
+        ws.column_dimensions[get_column_letter(col_idx + 2)].width = 10  # 레벨
+        col_idx += 3
     
-    stats_data.append(['소속별 응답자 수', '', ''])
-    for org, count in organizations.items():
-        stats_data.append(['', org, count])
-    
-    stats_data.append(['', '', ''])
-    
-    # 학력별 통계
-    educations = {}
-    for response in responses:
-        edu = response.get('studentInfo', {}).get('education', '미입력')
-        educations[edu] = educations.get(edu, 0) + 1
-    
-    stats_data.append(['학력별 응답자 수', '', ''])
-    for edu, count in educations.items():
-        stats_data.append(['', edu, count])
-    
-    stats_data.append(['', '', ''])
-    
-    # 전공별 통계
-    majors = {}
-    for response in responses:
-        major = response.get('studentInfo', {}).get('major', '미입력')
-        majors[major] = majors.get(major, 0) + 1
-    
-    stats_data.append(['전공별 응답자 수', '', ''])
-    for major, count in majors.items():
-        stats_data.append(['', major, count])
-    
-    stats_data.append(['', '', ''])
-    
-    # 점수 구간별 통계
-    score_ranges = {'90-100': 0, '80-89': 0, '70-79': 0, '60-69': 0, '60 미만': 0}
-    for response in responses:
-        score = response.get('aiAnalysis', {}).get('overallScore', 0)
-        if score >= 4.5:  # 5점 만점 기준 90%
-            score_ranges['90-100'] += 1
-        elif score >= 4.0:  # 80%
-            score_ranges['80-89'] += 1
-        elif score >= 3.5:  # 70%
-            score_ranges['70-79'] += 1
-        elif score >= 3.0:  # 60%
-            score_ranges['60-69'] += 1
-        else:
-            score_ranges['60 미만'] += 1
-    
-    stats_data.append(['점수 구간별 분포', '', ''])
-    for range_name, count in score_ranges.items():
-        stats_data.append(['', f'{range_name}점', count])
-    
-    df_stats = pd.DataFrame(stats_data, columns=['구분', '항목', '값'])
-    df_stats.to_excel(writer, sheet_name='통계 분석', index=False)
+    # 행 높이 조정
+    ws.row_dimensions[1].height = 25
 
 def upload_to_s3(file_path: str, s3_key: str):
     """S3에 파일 업로드"""
